@@ -31,12 +31,10 @@ STEP_COUNT = 16
 _freq_start_mhz = 0.0
 _step_mhz = 1.0
 
-# Window used before performing the FFT.
-_WINDOW = np.hanning(FFT_SIZE).astype(np.float32)
 # Buffer holding power values for a single sweep.  Each row represents one
 # frequency step.
 _sweep_buffer = np.zeros((STEP_COUNT, FFT_SIZE), dtype=np.float32)
-_current_step = 0
+_sweep_buffer_c = ffi.cast("float *", _sweep_buffer.ctypes.data)
 _callback: Callable[[np.ndarray], None]
 
 # Temporary storage used by :func:`measure_rssi`.
@@ -48,35 +46,13 @@ _rssi_count: int
 def _rx_callback(transfer) -> int:
     """C callback passed to ``hackrf_start_rx_sweep``.
 
-    The callback receives IQ samples from HackRF.  Each set of samples is
-    windowed and transformed using NumPy's FFT implementation.  The power
-    spectrum for each step is stored in ``_sweep_buffer`` until all steps are
-    collected, at which point the user provided Python callback is invoked
-    with a copy of the array.
+    The heavy FFT processing is implemented in C for efficiency.  This
+    callback merely forwards the incoming buffer to the native routine
+    and invokes the Python handler when a full sweep has been collected.
     """
-    global _current_step
-
-    buf = ffi.buffer(transfer.buffer, transfer.valid_length)
-    # Interpret the raw buffer as signed I/Q pairs.
-    iq = np.frombuffer(buf, dtype=np.int8).astype(np.float32)
-    if iq.size % 2:
-        iq = iq[:-1]
-    iq = iq.reshape(-1, 2)
-    complex_samples = iq[:, 0] + 1j * iq[:, 1]
-    # Apply window and FFT
-    windowed = complex_samples[:FFT_SIZE] * _WINDOW
-    spectrum = np.fft.fft(windowed)
-    power = 20 * np.log10(np.abs(spectrum) + 1e-12)
-
-    if _current_step < STEP_COUNT:
-        _sweep_buffer[_current_step] = power
-        _current_step += 1
-
-    if _current_step >= STEP_COUNT:
-        # One full sweep collected; call the Python handler with a copy of data
+    finished = lib.hs_process(transfer, _sweep_buffer_c)
+    if finished:
         _callback(_sweep_buffer.copy())
-        _current_step = 0
-
     return 0
 
 
@@ -104,13 +80,16 @@ def start_sweep(
     step_mhz:
         Step size between consecutive centre frequencies in MHz.
     """
-    global _callback, STEP_COUNT, _sweep_buffer, _freq_start_mhz, _step_mhz
+    global _callback, STEP_COUNT, _sweep_buffer, _sweep_buffer_c, _freq_start_mhz, _step_mhz
 
     _callback = callback
     _freq_start_mhz = freq_start_mhz
     _step_mhz = step_mhz
     STEP_COUNT = int((freq_stop_mhz - freq_start_mhz) / step_mhz)
     _sweep_buffer = np.zeros((STEP_COUNT, FFT_SIZE), dtype=np.float32)
+    _sweep_buffer_c = ffi.cast("float *", _sweep_buffer.ctypes.data)
+
+    lib.hs_prepare(FFT_SIZE, STEP_COUNT)
 
     if lib.hackrf_init() != 0:
         raise RuntimeError("hackrf_init failed")
@@ -152,6 +131,7 @@ def start_sweep(
     finally:
         lib.hackrf_close(dev)
         lib.hackrf_exit()
+        lib.hs_cleanup()
 
 
 @ffi.callback("int(hackrf_transfer*)")

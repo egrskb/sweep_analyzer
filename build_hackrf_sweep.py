@@ -42,12 +42,17 @@ ffibuilder.cdef(
     int hackrf_start_rx_sweep(hackrf_device* device,
                               int (*callback)(hackrf_transfer*), void* ctx);
     int hackrf_is_streaming(hackrf_device* device);
+
+    void hs_prepare(int fft_size, int step_count);
+    int hs_process(hackrf_transfer* transfer, float* sweep_buffer);
+    void hs_cleanup(void);
     """
 )
 
 ffibuilder.set_source(
     "hackrf_sweep._lib",
     "#include <libhackrf/hackrf.h>",
+    sources=["sweep_callback.c"],
     libraries=["hackrf", "usb-1.0", "fftw3f", "pthread"],
 )
 
