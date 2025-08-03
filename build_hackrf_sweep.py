@@ -37,9 +37,15 @@ ffibuilder.cdef(
                               int (*callback)(hackrf_transfer*), void* ctx);
     int hackrf_is_streaming(hackrf_device* device);
 
+    enum hackrf_usb_board_id {
+        USB_BOARD_ID_JAWBREAKER = 0x604B,
+        USB_BOARD_ID_HACKRF_ONE = 0x6089,
+        USB_BOARD_ID_RAD1O = 0xCC15,
+        USB_BOARD_ID_INVALID = 0xFFFF
+    };
     typedef struct {
         char** serial_numbers;
-        void* usb_board_ids;
+        enum hackrf_usb_board_id* usb_board_ids;
         int* usb_device_index;
         int devicecount;
         void** usb_devices;
