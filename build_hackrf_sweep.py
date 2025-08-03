@@ -18,6 +18,8 @@ ffibuilder.cdef(
         int buffer_length;
         int valid_length;
         void* rx_ctx;
+        void* tx_ctx;
+        ...;
     } hackrf_transfer;
 
     int hackrf_init(void);
@@ -40,7 +42,7 @@ ffibuilder.cdef(
 
 ffibuilder.set_source(
     "hackrf_sweep._lib",
-    "#include <hackrf.h>",
+    "#include <libhackrf/hackrf.h>",
     libraries=["hackrf", "usb-1.0", "fftw3f", "pthread"],
 )
 
