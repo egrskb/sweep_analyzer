@@ -36,12 +36,6 @@ _step_mhz = 1.0
 _sweep_buffer = np.zeros((STEP_COUNT, FFT_SIZE), dtype=np.float32)
 _sweep_buffer_c = ffi.cast("float *", _sweep_buffer.ctypes.data)
 _callback: Callable[[np.ndarray], None]
-
-# Temporary storage used by :func:`measure_rssi`.
-_rssi_buffer: np.ndarray
-_rssi_count: int
-
-
 @ffi.callback("int(hackrf_transfer*)")
 def _rx_callback(transfer) -> int:
     """C callback passed to ``hackrf_start_rx_sweep``.
@@ -63,6 +57,7 @@ def start_sweep(
     freq_start_mhz: float = 50.0,
     freq_stop_mhz: float = 6000.0,
     step_mhz: float = 5.0,
+    serial: Optional[str] = None,
 ) -> None:
     """Start sweeping with HackRF and call ``callback`` for each sweep.
 
@@ -79,6 +74,9 @@ def start_sweep(
         Frequency range to sweep, expressed in MHz.
     step_mhz:
         Step size between consecutive centre frequencies in MHz.
+    serial:
+        Optional serial number of the HackRF to open. ``None`` selects the
+        first available device.
     """
     global _callback, STEP_COUNT, _sweep_buffer, _sweep_buffer_c, _freq_start_mhz, _step_mhz
 
@@ -95,7 +93,8 @@ def start_sweep(
         raise RuntimeError("hackrf_init failed")
 
     dev_pp = ffi.new("hackrf_device **")
-    if lib.hackrf_open_by_serial(ffi.NULL, dev_pp) != 0:
+    ser = serial.encode() if serial is not None else ffi.NULL
+    if lib.hackrf_open_by_serial(ser, dev_pp) != 0:
         lib.hackrf_exit()
         raise RuntimeError("hackrf_open_by_serial failed")
     dev = dev_pp[0]
@@ -133,62 +132,3 @@ def start_sweep(
         lib.hackrf_exit()
         lib.hs_cleanup()
 
-
-@ffi.callback("int(hackrf_transfer*)")
-def _rssi_callback(transfer) -> int:
-    """Collect a fixed number of samples for RSSI estimation."""
-    global _rssi_buffer, _rssi_count
-
-    buf = ffi.buffer(transfer.buffer, transfer.valid_length)
-    iq = np.frombuffer(buf, dtype=np.int8).astype(np.float32)
-    if iq.size % 2:
-        iq = iq[:-1]
-    iq = iq.reshape(-1, 2)
-    complex_samples = iq[:, 0] + 1j * iq[:, 1]
-
-    to_copy = min(complex_samples.size, _rssi_buffer.size - _rssi_count)
-    if to_copy > 0:
-        _rssi_buffer[_rssi_count:_rssi_count + to_copy] = complex_samples[:to_copy]
-        _rssi_count += to_copy
-
-    # Returning non-zero stops streaming when enough samples are collected.
-    return -1 if _rssi_count >= _rssi_buffer.size else 0
-
-
-def measure_rssi(serial: Optional[str], frequency_mhz: float, *, num_samples: int = 4096) -> float:
-    """Tune a device to ``frequency_mhz`` and return average power in dB."""
-    global _rssi_buffer, _rssi_count
-
-    _rssi_buffer = np.zeros(num_samples, dtype=np.complex64)
-    _rssi_count = 0
-
-    if lib.hackrf_init() != 0:
-        raise RuntimeError("hackrf_init failed")
-
-    dev_pp = ffi.new("hackrf_device **")
-    ser = serial.encode() if serial is not None else ffi.NULL
-    if lib.hackrf_open_by_serial(ser, dev_pp) != 0:
-        lib.hackrf_exit()
-        raise RuntimeError("hackrf_open_by_serial failed")
-    dev = dev_pp[0]
-
-    try:
-        lib.hackrf_set_sample_rate_manual(dev, DEFAULT_SAMPLE_RATE, 1)
-        lib.hackrf_set_baseband_filter_bandwidth(dev, DEFAULT_BANDWIDTH)
-        lib.hackrf_set_vga_gain(dev, 20)
-        lib.hackrf_set_lna_gain(dev, 16)
-        lib.hackrf_set_freq(dev, int(frequency_mhz * 1e6))
-
-        if lib.hackrf_start_rx(dev, _rssi_callback, ffi.NULL) != 0:
-            raise RuntimeError("hackrf_start_rx failed")
-
-        while _rssi_count < num_samples:
-            time.sleep(0.01)
-
-        lib.hackrf_stop_rx(dev)
-
-        power = np.mean(np.abs(_rssi_buffer[:_rssi_count]) ** 2)
-        return 10 * np.log10(power + 1e-12)
-    finally:
-        lib.hackrf_close(dev)
-        lib.hackrf_exit()

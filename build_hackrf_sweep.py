@@ -31,17 +31,22 @@ ffibuilder.cdef(
     int hackrf_set_baseband_filter_bandwidth(hackrf_device* device, uint32_t bandwidth);
     int hackrf_set_vga_gain(hackrf_device* device, uint32_t gain);
     int hackrf_set_lna_gain(hackrf_device* device, uint32_t gain);
-    int hackrf_set_freq(hackrf_device* device, uint64_t freq_hz);
-
-    int hackrf_start_rx(hackrf_device* device,
-                        int (*callback)(hackrf_transfer*), void* ctx);
-    int hackrf_stop_rx(hackrf_device* device);
-
     int hackrf_init_sweep(hackrf_device* device, uint16_t* freqs, int num_ranges,
                           uint32_t num_bytes, uint32_t step, uint32_t offset, uint8_t style);
     int hackrf_start_rx_sweep(hackrf_device* device,
                               int (*callback)(hackrf_transfer*), void* ctx);
     int hackrf_is_streaming(hackrf_device* device);
+
+    typedef struct {
+        char** serial_numbers;
+        void* usb_board_ids;
+        int* usb_device_index;
+        int devicecount;
+        void** usb_devices;
+        int usb_devicecount;
+    } hackrf_device_list_t;
+    hackrf_device_list_t* hackrf_device_list(void);
+    void hackrf_device_list_free(hackrf_device_list_t* list);
 
     void hs_prepare(int fft_size, int step_count);
     int hs_process(hackrf_transfer* transfer, float* sweep_buffer);
@@ -51,7 +56,12 @@ ffibuilder.cdef(
 
 ffibuilder.set_source(
     "hackrf_sweep._lib",
-    "#include <libhackrf/hackrf.h>",
+    """
+    #include <libhackrf/hackrf.h>
+    void hs_prepare(int, int);
+    int hs_process(hackrf_transfer*, float*);
+    void hs_cleanup(void);
+    """,
     sources=["sweep_callback.c"],
     libraries=["hackrf", "usb-1.0", "fftw3f", "pthread"],
 )
