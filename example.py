@@ -2,6 +2,7 @@
 
 The script defines :func:`process_peaks` which receives the power array for
 an entire sweep and prints the frequency of the strongest bin in each step.
+Run ``python build_hackrf_sweep.py`` beforehand to compile the CFFI extension.
 """
 
 import numpy as np
