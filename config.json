@@ -1,0 +1,10 @@
+{
+  "sample_rate": 20000000,
+  "bandwidth": 15000000,
+  "freq_start_mhz": 50.0,
+  "freq_stop_mhz": 6000.0,
+  "step_mhz": 5.0,
+  "vga_gain": 20,
+  "lna_gain": 16,
+  "fft_threads": 1
+}

@@ -10,15 +10,20 @@ static float *g_window = NULL;
 static fftwf_complex *g_in = NULL;
 static fftwf_complex *g_out = NULL;
 static fftwf_plan g_plan = NULL;
+static int g_threads = 1;
 
-void hs_prepare(int fft_size, int step_count) {
+void hs_prepare(int fft_size, int step_count, int threads) {
     g_fft_size = fft_size;
     g_step_count = step_count;
     g_current_step = 0;
+    g_threads = threads > 0 ? threads : 1;
     if (g_window) { fftwf_free(g_window); g_window = NULL; }
     if (g_in) { fftwf_free(g_in); g_in = NULL; }
     if (g_out) { fftwf_free(g_out); g_out = NULL; }
     if (g_plan) { fftwf_destroy_plan(g_plan); g_plan = NULL; }
+
+    fftwf_init_threads();
+    fftwf_plan_with_nthreads(g_threads);
 
     g_window = (float*)fftwf_malloc(sizeof(float)*fft_size);
     g_in = (fftwf_complex*)fftwf_malloc(sizeof(fftwf_complex)*fft_size);
@@ -34,6 +39,7 @@ void hs_cleanup(void) {
     if (g_in) { fftwf_free(g_in); g_in = NULL; }
     if (g_out) { fftwf_free(g_out); g_out = NULL; }
     if (g_plan) { fftwf_destroy_plan(g_plan); g_plan = NULL; }
+    fftwf_cleanup_threads();
 }
 
 int hs_process(hackrf_transfer* transfer, float* sweep_buffer) {

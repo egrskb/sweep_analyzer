@@ -6,13 +6,13 @@ import numpy as np
 
 from typing import List, Optional
 
-from hackrf_sweep import start_sweep
-from hackrf_sweep.core import DEFAULT_SAMPLE_RATE, FFT_SIZE, ffi, lib
+from hackrf_sweep import start_sweep, load_config
+from hackrf_sweep.core import FFT_SIZE, ffi, lib
 
-START_MHZ = 50
-STOP_MHZ = 6000
-STEP_MHZ = 5
-BIN_WIDTH_MHZ = DEFAULT_SAMPLE_RATE / FFT_SIZE / 1e6
+CONFIG = load_config()
+START_MHZ = CONFIG["freq_start_mhz"]
+STEP_MHZ = CONFIG["step_mhz"]
+BIN_WIDTH_MHZ = CONFIG["sample_rate"] / FFT_SIZE / 1e6
 
 
 def list_serials() -> List[Optional[str]]:
@@ -54,8 +54,5 @@ if __name__ == "__main__":
 
     start_sweep(
         process_peaks,
-        freq_start_mhz=START_MHZ,
-        freq_stop_mhz=STOP_MHZ,
-        step_mhz=STEP_MHZ,
         serial=master,
     )

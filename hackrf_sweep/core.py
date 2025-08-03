@@ -8,6 +8,7 @@ illustrate how the C API may be wrapped using :mod:`cffi`.
 
 from __future__ import annotations
 
+import json
 import time
 from typing import Callable, Optional
 
@@ -31,11 +32,23 @@ STEP_COUNT = 16
 _freq_start_mhz = 0.0
 _step_mhz = 1.0
 
-# Buffer holding power values for a single sweep.  Each row represents one
-# frequency step.
-_sweep_buffer = np.zeros((STEP_COUNT, FFT_SIZE), dtype=np.float32)
-_sweep_buffer_c = ffi.cast("float *", _sweep_buffer.ctypes.data)
+# Double buffers holding power values for sweeps.  We flip between them each
+# time a sweep completes to avoid copying data for the Python callback.
+_buffers = [np.zeros((STEP_COUNT, FFT_SIZE), dtype=np.float32),
+            np.zeros((STEP_COUNT, FFT_SIZE), dtype=np.float32)]
+_buffer_ptrs = [ffi.cast("float *", _buffers[0].ctypes.data),
+                ffi.cast("float *", _buffers[1].ctypes.data)]
+_active_buf = 0
+
 _callback: Callable[[np.ndarray], None]
+
+
+def load_config(path: str = "config.json") -> dict:
+    """Load sweep parameters from a JSON file."""
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
 @ffi.callback("int(hackrf_transfer*)")
 def _rx_callback(transfer) -> int:
     """C callback passed to ``hackrf_start_rx_sweep``.
@@ -44,50 +57,45 @@ def _rx_callback(transfer) -> int:
     callback merely forwards the incoming buffer to the native routine
     and invokes the Python handler when a full sweep has been collected.
     """
-    finished = lib.hs_process(transfer, _sweep_buffer_c)
+    global _active_buf
+    finished = lib.hs_process(transfer, _buffer_ptrs[_active_buf])
     if finished:
-        _callback(_sweep_buffer.copy())
+        ready = _active_buf
+        _active_buf ^= 1
+        _callback(_buffers[ready])
     return 0
 
 
 def start_sweep(
     callback: Callable[[np.ndarray], None], *,
-    sample_rate: float = DEFAULT_SAMPLE_RATE,
-    bandwidth: float = DEFAULT_BANDWIDTH,
-    freq_start_mhz: float = 50.0,
-    freq_stop_mhz: float = 6000.0,
-    step_mhz: float = 5.0,
+    config_path: str = "config.json",
     serial: Optional[str] = None,
 ) -> None:
-    """Start sweeping with HackRF and call ``callback`` for each sweep.
+    """Start sweeping with HackRF and call ``callback`` for each sweep."""
 
-    Parameters
-    ----------
-    callback:
-        Callable invoked with ``numpy.ndarray`` containing power values in dB
-        for an entire sweep.
-    sample_rate:
-        Sample rate passed to ``hackrf_set_sample_rate_manual``.
-    bandwidth:
-        Baseband filter bandwidth.
-    freq_start_mhz, freq_stop_mhz:
-        Frequency range to sweep, expressed in MHz.
-    step_mhz:
-        Step size between consecutive centre frequencies in MHz.
-    serial:
-        Optional serial number of the HackRF to open. ``None`` selects the
-        first available device.
-    """
-    global _callback, STEP_COUNT, _sweep_buffer, _sweep_buffer_c, _freq_start_mhz, _step_mhz
+    global _callback, STEP_COUNT, _buffers, _buffer_ptrs, _freq_start_mhz, _step_mhz, _active_buf
+
+    cfg = load_config(config_path)
+    sample_rate = int(cfg.get("sample_rate", DEFAULT_SAMPLE_RATE))
+    bandwidth = int(cfg.get("bandwidth", DEFAULT_BANDWIDTH))
+    freq_start_mhz = float(cfg.get("freq_start_mhz", 50.0))
+    freq_stop_mhz = float(cfg.get("freq_stop_mhz", 6000.0))
+    step_mhz = float(cfg.get("step_mhz", 5.0))
+    vga_gain = int(cfg.get("vga_gain", 20))
+    lna_gain = int(cfg.get("lna_gain", 16))
+    fft_threads = int(cfg.get("fft_threads", 1))
 
     _callback = callback
     _freq_start_mhz = freq_start_mhz
     _step_mhz = step_mhz
     STEP_COUNT = int((freq_stop_mhz - freq_start_mhz) / step_mhz)
-    _sweep_buffer = np.zeros((STEP_COUNT, FFT_SIZE), dtype=np.float32)
-    _sweep_buffer_c = ffi.cast("float *", _sweep_buffer.ctypes.data)
+    _buffers = [np.zeros((STEP_COUNT, FFT_SIZE), dtype=np.float32),
+                np.zeros((STEP_COUNT, FFT_SIZE), dtype=np.float32)]
+    _buffer_ptrs = [ffi.cast("float *", _buffers[0].ctypes.data),
+                    ffi.cast("float *", _buffers[1].ctypes.data)]
+    _active_buf = 0
 
-    lib.hs_prepare(FFT_SIZE, STEP_COUNT)
+    lib.hs_prepare(FFT_SIZE, STEP_COUNT, fft_threads)
 
     if lib.hackrf_init() != 0:
         raise RuntimeError("hackrf_init failed")
@@ -100,10 +108,10 @@ def start_sweep(
     dev = dev_pp[0]
 
     try:
-        lib.hackrf_set_sample_rate_manual(dev, int(sample_rate), 1)
-        lib.hackrf_set_baseband_filter_bandwidth(dev, int(bandwidth))
-        lib.hackrf_set_vga_gain(dev, 20)
-        lib.hackrf_set_lna_gain(dev, 16)
+        lib.hackrf_set_sample_rate_manual(dev, sample_rate, 1)
+        lib.hackrf_set_baseband_filter_bandwidth(dev, bandwidth)
+        lib.hackrf_set_vga_gain(dev, vga_gain)
+        lib.hackrf_set_lna_gain(dev, lna_gain)
 
         freqs = ffi.new(
             "uint16_t[2]",

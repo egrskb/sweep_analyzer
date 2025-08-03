@@ -54,7 +54,7 @@ ffibuilder.cdef(
     hackrf_device_list_t* hackrf_device_list(void);
     void hackrf_device_list_free(hackrf_device_list_t* list);
 
-    void hs_prepare(int fft_size, int step_count);
+    void hs_prepare(int fft_size, int step_count, int threads);
     int hs_process(hackrf_transfer* transfer, float* sweep_buffer);
     void hs_cleanup(void);
     """
@@ -64,12 +64,12 @@ ffibuilder.set_source(
     "hackrf_sweep._lib",
     """
     #include <libhackrf/hackrf.h>
-    void hs_prepare(int, int);
+    void hs_prepare(int, int, int);
     int hs_process(hackrf_transfer*, float*);
     void hs_cleanup(void);
     """,
     sources=["sweep_callback.c"],
-    libraries=["hackrf", "usb-1.0", "fftw3f", "pthread"],
+    libraries=["hackrf", "usb-1.0", "fftw3f", "fftw3f_threads", "pthread"],
 )
 
 if __name__ == "__main__":
