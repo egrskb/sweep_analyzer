@@ -52,22 +52,17 @@ void hs_cleanup(void) {
 int hs_process(hackrf_transfer* transfer, float* sweep_buffer) {
     if (!g_window) return 0;
     int8_t* buf = (int8_t*)transfer->buffer;
-    /* First pass: calculate the average I and Q values in order to remove the
-     * DC component from the incoming block. */
     float mean_re = 0.0f;
     float mean_im = 0.0f;
+    /* Single pass: update running mean while applying the Hann window and
+     * scaling samples to floats.  This avoids a second read of the IQ buffer. */
     for (int i = 0; i < g_fft_size; i++) {
-        mean_re += buf[2*i];
-        mean_im += buf[2*i+1];
-    }
-    mean_re /= g_fft_size;
-    mean_im /= g_fft_size;
-
-    /* Second pass: apply the Hann window, subtract the DC offset and scale the
-     * 8‑bit samples into the [-1, 1] range expected by FFTW. */
-    for (int i = 0; i < g_fft_size; i++) {
-        float re = ((float)buf[2*i]   - mean_re) / 128.0f;
-        float im = ((float)buf[2*i+1] - mean_im) / 128.0f;
+        float re = buf[2*i];
+        float im = buf[2*i+1];
+        mean_re += (re - mean_re) / (i + 1);
+        mean_im += (im - mean_im) / (i + 1);
+        re = (re - mean_re) / 128.0f;
+        im = (im - mean_im) / 128.0f;
         g_in[i][0] = re * g_window[i];
         g_in[i][1] = im * g_window[i];
     }

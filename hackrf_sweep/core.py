@@ -9,7 +9,9 @@ illustrate how the C API may be wrapped using :mod:`cffi`.
 from __future__ import annotations
 
 import json
+import os
 import time
+from threading import Event
 from typing import Callable, Optional
 
 import numpy as np
@@ -47,7 +49,7 @@ _slaves: list[ffi.CData] = []
 
 # Temporary storage used by the RSSI callback.
 _rssi_result: float = 0.0
-_rssi_done: bool = False
+_rssi_event = Event()
 
 # Empirical offset that roughly converts the FFT magnitudes into the dBm
 # range.  The exact value depends on hardware calibration and is only intended
@@ -81,7 +83,7 @@ def _rx_callback(transfer) -> int:
 @ffi.callback("int(hackrf_transfer*)")
 def _rssi_callback(transfer) -> int:
     """Collect a single buffer of IQ samples and compute its power."""
-    global _rssi_result, _rssi_done
+    global _rssi_result
     buf = ffi.buffer(transfer.buffer, transfer.valid_length)
     # Convert interleaved int8 IQ samples to float.
     iq = (
@@ -95,7 +97,7 @@ def _rssi_callback(transfer) -> int:
     power = np.mean(iq ** 2)
     # Convert to dBm, protecting against log(0).
     _rssi_result = 10 * np.log10(power + 1e-12) + RSSI_OFFSET_DBM
-    _rssi_done = True
+    _rssi_event.set()
     return 0
 
 
@@ -104,11 +106,9 @@ def measure_rssi(freq_hz: float) -> list[float]:
     results: list[float] = []
     for dev in _slaves:
         lib.hackrf_set_freq(dev, int(freq_hz))
-        global _rssi_done
-        _rssi_done = False
+        _rssi_event.clear()
         lib.hackrf_start_rx(dev, _rssi_callback, ffi.NULL)
-        while not _rssi_done:
-            time.sleep(0.01)
+        _rssi_event.wait()
         lib.hackrf_stop_rx(dev)
         results.append(_rssi_result)
     return results
@@ -131,7 +131,7 @@ def start_sweep(
     step_mhz = float(cfg.get("step_mhz", 5.0))
     vga_gain = int(cfg.get("vga_gain", 20))
     lna_gain = int(cfg.get("lna_gain", 16))
-    fft_threads = int(cfg.get("fft_threads", 1))
+    fft_threads = int(cfg.get("fft_threads", os.cpu_count() or 1))
 
     _callback = callback
     _freq_start_mhz = freq_start_mhz
