@@ -3,6 +3,9 @@
 #include <math.h>
 #include <fftw3.h>
 
+/* Global state used by the lightweight C helper.  These variables hold the
+ * FFT configuration, window coefficients and work buffers.  They are
+ * initialised by ``hs_prepare`` and freed by ``hs_cleanup``. */
 static int g_fft_size = 0;
 static int g_step_count = 0;
 static int g_current_step = 0;
@@ -11,6 +14,10 @@ static fftwf_complex *g_in = NULL;
 static fftwf_complex *g_out = NULL;
 static fftwf_plan g_plan = NULL;
 static int g_threads = 1;
+/* Constant that shifts the log power output into the dBm range.  The value is
+ * empirical and merely provides a rough reference level for distance
+ * estimation. */
+static const float RSSI_OFFSET_DBM = -70.0f;
 
 void hs_prepare(int fft_size, int step_count, int threads) {
     g_fft_size = fft_size;
@@ -45,11 +52,24 @@ void hs_cleanup(void) {
 int hs_process(hackrf_transfer* transfer, float* sweep_buffer) {
     if (!g_window) return 0;
     int8_t* buf = (int8_t*)transfer->buffer;
-    for (int i=0;i<g_fft_size;i++) {
-        float re = (float)buf[2*i] * g_window[i];
-        float im = (float)buf[2*i+1] * g_window[i];
-        g_in[i][0] = re;
-        g_in[i][1] = im;
+    /* First pass: calculate the average I and Q values in order to remove the
+     * DC component from the incoming block. */
+    float mean_re = 0.0f;
+    float mean_im = 0.0f;
+    for (int i = 0; i < g_fft_size; i++) {
+        mean_re += buf[2*i];
+        mean_im += buf[2*i+1];
+    }
+    mean_re /= g_fft_size;
+    mean_im /= g_fft_size;
+
+    /* Second pass: apply the Hann window, subtract the DC offset and scale the
+     * 8‑bit samples into the [-1, 1] range expected by FFTW. */
+    for (int i = 0; i < g_fft_size; i++) {
+        float re = ((float)buf[2*i]   - mean_re) / 128.0f;
+        float im = ((float)buf[2*i+1] - mean_im) / 128.0f;
+        g_in[i][0] = re * g_window[i];
+        g_in[i][1] = im * g_window[i];
     }
     fftwf_execute(g_plan);
     float* dest = sweep_buffer + g_current_step * g_fft_size;
@@ -57,7 +77,10 @@ int hs_process(hackrf_transfer* transfer, float* sweep_buffer) {
         float re = g_out[i][0];
         float im = g_out[i][1];
         float mag = sqrtf(re*re + im*im);
-        dest[i] = 20.0f * log10f(mag + 1e-12f);
+        /* Convert magnitude to dBm.  The small offset protects against log(0)
+         * and RSSI_OFFSET_DBM roughly aligns readings with a practical dBm
+         * scale. */
+        dest[i] = 20.0f * log10f(mag + 1e-12f) + RSSI_OFFSET_DBM;
     }
     g_current_step++;
     if (g_current_step >= g_step_count) {

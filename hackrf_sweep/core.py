@@ -49,6 +49,11 @@ _slaves: list[ffi.CData] = []
 _rssi_result: float = 0.0
 _rssi_done: bool = False
 
+# Empirical offset that roughly converts the FFT magnitudes into the dBm
+# range.  The exact value depends on hardware calibration and is only intended
+# to provide a stable reference for distance estimation.
+RSSI_OFFSET_DBM = -70.0
+
 
 def load_config(path: str = "config.json") -> dict:
     """Load sweep parameters from a JSON file."""
@@ -78,11 +83,18 @@ def _rssi_callback(transfer) -> int:
     """Collect a single buffer of IQ samples and compute its power."""
     global _rssi_result, _rssi_done
     buf = ffi.buffer(transfer.buffer, transfer.valid_length)
-    # Convert interleaved int8 IQ samples to float and compute mean power.
-    iq = np.frombuffer(buf, dtype=np.int8).astype(np.float32).reshape(-1, 2)
+    # Convert interleaved int8 IQ samples to float.
+    iq = (
+        np.frombuffer(buf, dtype=np.int8)
+        .astype(np.float32)
+        .reshape(-1, 2)
+    )
+    # Remove DC offset and normalise to the [-1, 1] range.
+    iq -= iq.mean(axis=0)
+    iq /= 128.0
     power = np.mean(iq ** 2)
-    # Convert to dB, protecting against log(0).
-    _rssi_result = 10 * np.log10(power + 1e-12)
+    # Convert to dBm, protecting against log(0).
+    _rssi_result = 10 * np.log10(power + 1e-12) + RSSI_OFFSET_DBM
     _rssi_done = True
     return 0
 
