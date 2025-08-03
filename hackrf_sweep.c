@@ -21,6 +21,34 @@
  * Boston, MA 02110-1301, USA.
  */
 
+/*
+ * Python module analyzemodule.py should contain:
+ * import numpy as np
+ * baseline = None
+ *
+ * def process_sweep(sweep: np.ndarray):
+ *     global baseline
+ *     # При первом свипе сохраняем baseline
+ *     if baseline is None:
+ *         baseline = sweep.copy()
+ *         print("Baseline сохранён", baseline.shape)
+ *         return
+ *
+ *     # Разность текущего свипа и базового
+ *     delta = sweep - baseline
+ *
+ *     # Жёсткий порог 10 дБ
+ *     mask = delta > 10.0  # изменение свыше 10 дБ
+ *
+ *     if mask.any():
+ *         ys, xs = np.where(mask)
+ *         for y, x in zip(ys, xs):
+ *             print(f"Аномалия на шаге {y}, бине {x}, Δ={delta[y,x]:.2f} дБ")
+ *
+ *     # Опционально сглаживаем baseline
+ *     baseline[:] = 0.99 * baseline + 0.01 * sweep
+ */
+
 #include <hackrf.h>
 
 #include <stdio.h>
@@ -35,6 +63,8 @@
 #include <errno.h>
 #include <fftw3.h>
 #include <inttypes.h>
+#include <Python.h>
+#include <numpy/arrayobject.h>
 
 #define _FILE_OFFSET_BITS 64
 
@@ -91,13 +121,14 @@ int gettimeofday(struct timeval* tv, void* ignored)
 
 #define FREQ_ONE_MHZ (1000000ull)
 
-#define FREQ_MIN_MHZ (0)    /*    0 MHz */
-#define FREQ_MAX_MHZ (7250) /* 7250 MHz */
+#define FREQ_MIN_HZ   50000000ULL   /*  50 MHz */
+#define FREQ_MAX_HZ 6000000000ULL   /*   6 GHz */
+#define TUNE_STEP_HZ   5000000ULL   /*   5 MHz */
 
 #define DEFAULT_SAMPLE_RATE_HZ            (20000000) /* 20MHz default sample rate */
 #define DEFAULT_BASEBAND_FILTER_BANDWIDTH (15000000) /* 15MHz default */
 
-#define TUNE_STEP (DEFAULT_SAMPLE_RATE_HZ / FREQ_ONE_MHZ)
+#define TUNE_STEP (TUNE_STEP_HZ / FREQ_ONE_MHZ)
 #define OFFSET    7500000
 
 #define BLOCKS_PER_TRANSFER 16
@@ -110,9 +141,12 @@ int gettimeofday(struct timeval* tv, void* ignored)
 #endif
 
 uint32_t num_sweeps = 0;
-int num_ranges = 0;
-uint16_t frequencies[MAX_SWEEP_RANGES * 2];
-int step_count;
+int step_count = 1 + (int) ((FREQ_MAX_HZ - FREQ_MIN_HZ) / TUNE_STEP_HZ);
+uint64_t* frequencies = NULL;
+float* full_sweep = NULL;
+int sweep_index = 0;
+PyObject* pModule = NULL;
+PyObject* pFunc = NULL;
 
 static float TimevalDiff(const struct timeval* a, const struct timeval* b)
 {
@@ -257,38 +291,49 @@ int rx_callback(hackrf_transfer* transfer)
 			buf += BYTES_PER_BLOCK;
 			continue;
 		}
-		if (frequency == (uint64_t) (FREQ_ONE_MHZ * frequencies[0])) {
-			if (sweep_started) {
-				if (ifft_output) {
-					fftwf_execute(ifftwPlan);
-					for (i = 0; i < ifft_bins; i++) {
-						ifftwOut[i][0] *= 1.0f / ifft_bins;
-						ifftwOut[i][1] *= 1.0f / ifft_bins;
-						fwrite(&ifftwOut[i][0],
-						       sizeof(float),
-						       1,
-						       outfile);
-						fwrite(&ifftwOut[i][1],
-						       sizeof(float),
-						       1,
-						       outfile);
-					}
-				}
-				sweep_count++;
+                if (frequency == FREQ_MIN_HZ) {
+                        if (sweep_started) {
+                                if (ifft_output) {
+                                        fftwf_execute(ifftwPlan);
+                                        for (i = 0; i < ifft_bins; i++) {
+                                                ifftwOut[i][0] *= 1.0f / ifft_bins;
+                                                ifftwOut[i][1] *= 1.0f / ifft_bins;
+                                                fwrite(&ifftwOut[i][0],
+                                                       sizeof(float),
+                                                       1,
+                                                       outfile);
+                                                fwrite(&ifftwOut[i][1],
+                                                       sizeof(float),
+                                                       1,
+                                                       outfile);
+                                        }
+                                }
+                                sweep_count++;
 
-				if (timestamp_normalized == true) {
-					// set the timestamp of the next sweep
-					gettimeofday(&usb_transfer_time, NULL);
-				}
+                                if (timestamp_normalized == true) {
+                                        // set the timestamp of the next sweep
+                                        gettimeofday(&usb_transfer_time, NULL);
+                                }
 
-				if (one_shot) {
-					do_exit = true;
-				} else if (finite_mode && sweep_count == num_sweeps) {
-					do_exit = true;
-				}
-			}
-			sweep_started = true;
-		}
+                                if (one_shot) {
+                                        do_exit = true;
+                                } else if (finite_mode && sweep_count == num_sweeps) {
+                                        do_exit = true;
+                                }
+
+                                PyGILState_STATE gstate = PyGILState_Ensure();
+                                npy_intp dims[2] = { step_count, fftSize };
+                                PyObject* pArray = PyArray_SimpleNewFromData(2, dims, NPY_FLOAT32, full_sweep);
+                                PyArray_CLEARFLAGS((PyArrayObject*) pArray, NPY_ARRAY_OWNDATA);
+                                PyObject* pArgs = PyTuple_Pack(1, pArray);
+                                PyObject_CallObject(pFunc, pArgs);
+                                Py_DECREF(pArgs);
+                                Py_DECREF(pArray);
+                                PyGILState_Release(gstate);
+                                sweep_index = 0;
+                        }
+                        sweep_started = true;
+                }
 		if (do_exit) {
 			return 0;
 		}
@@ -296,7 +341,7 @@ int rx_callback(hackrf_transfer* transfer)
 			buf += BYTES_PER_BLOCK;
 			continue;
 		}
-		if ((FREQ_MAX_MHZ * FREQ_ONE_MHZ) < frequency) {
+                if (FREQ_MAX_HZ < frequency) {
 			buf += BYTES_PER_BLOCK;
 			continue;
 		}
@@ -307,10 +352,12 @@ int rx_callback(hackrf_transfer* transfer)
 			fftwIn[i][1] = buf[i * 2 + 1] * window[i] * 1.0f / 128.0f;
 		}
 		buf += fftSize * 2;
-		fftwf_execute(fftwPlan);
-		for (i = 0; i < fftSize; i++) {
-			pwr[i] = logPower(fftwOut[i], 1.0f / fftSize);
-		}
+                fftwf_execute(fftwPlan);
+                for (i = 0; i < fftSize; i++) {
+                        pwr[i] = logPower(fftwOut[i], 1.0f / fftSize);
+                        full_sweep[sweep_index * fftSize + i] = pwr[i];
+                }
+                sweep_index++;
 		if (binary_output) {
 			record_length =
 				2 * sizeof(band_edge) + (fftSize / 4) * sizeof(float);
@@ -332,9 +379,9 @@ int rx_callback(hackrf_transfer* transfer)
 			fwrite(&band_edge, sizeof(band_edge), 1, outfile);
 			fwrite(&pwr[1 + fftSize / 8], sizeof(float), fftSize / 4, outfile);
 		} else if (ifft_output) {
-			ifft_idx = (uint32_t) round(
-				(frequency - (uint64_t) (FREQ_ONE_MHZ * frequencies[0])) /
-				fft_bin_width);
+                        ifft_idx = (uint32_t) round(
+                                (frequency - FREQ_MIN_HZ) /
+                                fft_bin_width);
 			ifft_idx = (ifft_idx + ifft_bins / 2) % ifft_bins;
 			for (i = 0; (fftSize / 4) > i; i++) {
 				ifftwIn[ifft_idx + i][0] =
@@ -391,9 +438,8 @@ static void usage()
 		"Usage:\n"
 		"\t[-h] # this help\n"
 		"\t[-d serial_number] # Serial number of desired HackRF\n"
-		"\t[-a amp_enable] # RX RF amplifier 1=Enable, 0=Disable\n"
-		"\t[-f freq_min:freq_max] # minimum and maximum frequencies in MHz\n"
-		"\t[-p antenna_enable] # Antenna port power, 1=Enable, 0=Disable\n"
+                "\t[-a amp_enable] # RX RF amplifier 1=Enable, 0=Disable\n"
+                "\t[-p antenna_enable] # Antenna port power, 1=Enable, 0=Disable\n"
 		"\t[-l gain_db] # RX LNA (IF) gain, 0-40dB, 8dB steps\n"
 		"\t[-g gain_db] # RX VGA (baseband) gain, 0-62dB, 2dB steps\n"
 		"\t[-w bin_width] # FFT bin width (frequency resolution) in Hz, 2445-5000000\n"
@@ -462,22 +508,30 @@ int export_wisdom(const char* path)
 
 int main(int argc, char** argv)
 {
-	int opt, i, result = 0;
-	const char* path = NULL;
-	const char* serial_number = NULL;
-	int exit_code = EXIT_SUCCESS;
-	struct timeval time_now;
-	struct timeval time_prev;
-	float time_diff;
-	float sweep_rate = 0;
-	unsigned int lna_gain = 16, vga_gain = 20;
-	uint32_t freq_min = 0;
-	uint32_t freq_max = 6000;
-	uint32_t requested_fft_bin_width;
-	const char* fftwWisdomPath = NULL;
-	int fftw_plan_type = FFTW_MEASURE;
+        int opt, i, result = 0;
+        const char* path = NULL;
+        const char* serial_number = NULL;
+        int exit_code = EXIT_SUCCESS;
+        struct timeval time_now;
+        struct timeval time_prev;
+        float time_diff;
+        float sweep_rate = 0;
+        unsigned int lna_gain = 16, vga_gain = 20;
+        uint32_t requested_fft_bin_width;
+        const char* fftwWisdomPath = NULL;
+        int fftw_plan_type = FFTW_MEASURE;
 
-	while ((opt = getopt(argc, argv, "a:f:p:l:g:d:N:w:W:P:n1BIr:h?")) != EOF) {
+        Py_Initialize();
+        import_array1(EXIT_FAILURE);
+        pModule = PyImport_ImportModule("analyzemodule");
+        pFunc   = PyObject_GetAttrString(pModule, "process_sweep");
+
+        frequencies = (uint64_t*) malloc(step_count * sizeof(uint64_t));
+        for (i = 0; i < step_count; i++) {
+                frequencies[i] = FREQ_MIN_HZ + (uint64_t) i * TUNE_STEP_HZ;
+        }
+
+        while ((opt = getopt(argc, argv, "a:p:l:g:d:N:w:W:P:n1BIr:h?")) != EOF) {
 		result = HACKRF_SUCCESS;
 		switch (opt) {
 		case 'd':
@@ -489,32 +543,6 @@ int main(int argc, char** argv)
 			result = parse_u32(optarg, &amp_enable);
 			break;
 
-		case 'f':
-			result = parse_u32_range(optarg, &freq_min, &freq_max);
-			if (freq_min >= freq_max) {
-				fprintf(stderr,
-					"argument error: freq_max must be greater than freq_min.\n");
-				usage();
-				return EXIT_FAILURE;
-			}
-			if (FREQ_MAX_MHZ < freq_max) {
-				fprintf(stderr,
-					"argument error: freq_max may not be higher than %u.\n",
-					FREQ_MAX_MHZ);
-				usage();
-				return EXIT_FAILURE;
-			}
-			if (MAX_SWEEP_RANGES <= num_ranges) {
-				fprintf(stderr,
-					"argument error: specify a maximum of %u frequency ranges.\n",
-					MAX_SWEEP_RANGES);
-				usage();
-				return EXIT_FAILURE;
-			}
-			frequencies[2 * num_ranges] = (uint16_t) freq_min;
-			frequencies[2 * num_ranges + 1] = (uint16_t) freq_max;
-			num_ranges++;
-			break;
 
 		case 'p':
 			antenna = true;
@@ -634,26 +662,14 @@ int main(int argc, char** argv)
 		}
 	}
 
-	if (0 == num_ranges) {
-		frequencies[0] = (uint16_t) freq_min;
-		frequencies[1] = (uint16_t) freq_max;
-		num_ranges++;
-	}
-
-	if (binary_output && ifft_output) {
+        if (binary_output && ifft_output) {
 		fprintf(stderr,
 			"argument error: binary output (-B) and IFFT output (-I) are mutually exclusive.\n");
 		return EXIT_FAILURE;
 	}
 
-	if (ifft_output && (1 < num_ranges)) {
-		fprintf(stderr,
-			"argument error: only one frequency range is supported in IFFT output (-I) mode.\n");
-		return EXIT_FAILURE;
-	}
-
-	/*
-	 * The FFT bin width must be no more than a quarter of the sample rate
+        /*
+         * The FFT bin width must be no more than a quarter of the sample rate
 	 * for interleaved mode. With our fixed sample rate of 20 Msps, that
 	 * results in a maximum bin width of 5000000 Hz.
 	 */
@@ -688,13 +704,15 @@ int main(int argc, char** argv)
 	fft_bin_width = (double) DEFAULT_SAMPLE_RATE_HZ / fftSize;
 	fftwIn = (fftwf_complex*) fftwf_malloc(sizeof(fftwf_complex) * fftSize);
 	fftwOut = (fftwf_complex*) fftwf_malloc(sizeof(fftwf_complex) * fftSize);
-	fftwPlan =
-		fftwf_plan_dft_1d(fftSize, fftwIn, fftwOut, FFTW_FORWARD, fftw_plan_type);
-	pwr = (float*) fftwf_malloc(sizeof(float) * fftSize);
-	window = (float*) fftwf_malloc(sizeof(float) * fftSize);
-	for (i = 0; i < fftSize; i++) {
-		window[i] = (float) (0.5f * (1.0f - cos(2 * M_PI * i / (fftSize - 1))));
-	}
+        fftwPlan =
+                fftwf_plan_dft_1d(fftSize, fftwIn, fftwOut, FFTW_FORWARD, fftw_plan_type);
+        pwr = (float*) fftwf_malloc(sizeof(float) * fftSize);
+        window = (float*) fftwf_malloc(sizeof(float) * fftSize);
+        for (i = 0; i < fftSize; i++) {
+                window[i] = (float) (0.5f * (1.0f - cos(2 * M_PI * i / (fftSize - 1))));
+        }
+
+        full_sweep = (float*) malloc(step_count * fftSize * sizeof(float));
 
 	/* Execute the plan once to make sure it's ready to go when real
 	 * data starts to flow.  See issue #1366
@@ -789,27 +807,11 @@ int main(int argc, char** argv)
 	result = hackrf_set_vga_gain(device, vga_gain);
 	result |= hackrf_set_lna_gain(device, lna_gain);
 
-	/*
-	 * For each range, plan a whole number of tuning steps of a certain
-	 * bandwidth. Increase high end of range if necessary to accommodate a
-	 * whole number of steps, minimum 1.
-	 */
-	for (i = 0; i < num_ranges; i++) {
-		step_count =
-			1 + (frequencies[2 * i + 1] - frequencies[2 * i] - 1) / TUNE_STEP;
-		frequencies[2 * i + 1] =
-			(uint16_t) (frequencies[2 * i] + step_count * TUNE_STEP);
-		fprintf(stderr,
-			"Sweeping from %u MHz to %u MHz\n",
-			frequencies[2 * i],
-			frequencies[2 * i + 1]);
-	}
-
-	if (ifft_output) {
-		ifftwIn = (fftwf_complex*) fftwf_malloc(
-			sizeof(fftwf_complex) * fftSize * step_count);
-		ifftwOut = (fftwf_complex*) fftwf_malloc(
-			sizeof(fftwf_complex) * fftSize * step_count);
+        if (ifft_output) {
+                ifftwIn = (fftwf_complex*) fftwf_malloc(
+                        sizeof(fftwf_complex) * fftSize * step_count);
+                ifftwOut = (fftwf_complex*) fftwf_malloc(
+                        sizeof(fftwf_complex) * fftSize * step_count);
 		ifftwPlan = fftwf_plan_dft_1d(
 			fftSize * step_count,
 			ifftwIn,
@@ -823,14 +825,17 @@ int main(int argc, char** argv)
 		fftwf_execute(ifftwPlan);
 	}
 
-	result = hackrf_init_sweep(
-		device,
-		frequencies,
-		num_ranges,
-		BYTES_PER_BLOCK,
-		TUNE_STEP * FREQ_ONE_MHZ,
-		OFFSET,
-		INTERLEAVED);
+        uint16_t sweep_freqs_mhz[2] = {
+                (uint16_t) (FREQ_MIN_HZ / FREQ_ONE_MHZ),
+                (uint16_t) (FREQ_MAX_HZ / FREQ_ONE_MHZ)};
+        result = hackrf_init_sweep(
+                device,
+                sweep_freqs_mhz,
+                1,
+                BYTES_PER_BLOCK,
+                TUNE_STEP_HZ,
+                OFFSET,
+                INTERLEAVED);
 	if (result != HACKRF_SUCCESS) {
 		fprintf(stderr,
 			"hackrf_init_sweep() failed: %s (%d)\n",
@@ -951,9 +956,16 @@ int main(int argc, char** argv)
 	fftwf_free(fftwOut);
 	fftwf_free(pwr);
 	fftwf_free(window);
-	fftwf_free(ifftwIn);
-	fftwf_free(ifftwOut);
-	export_wisdom(fftwWisdomPath);
-	fprintf(stderr, "exit\n");
-	return exit_code;
+        fftwf_free(ifftwIn);
+        fftwf_free(ifftwOut);
+        free(full_sweep);
+        free(frequencies);
+        if (pFunc)
+                Py_DECREF(pFunc);
+        if (pModule)
+                Py_DECREF(pModule);
+        Py_Finalize();
+        export_wisdom(fftwWisdomPath);
+        fprintf(stderr, "exit\n");
+        return exit_code;
 }
