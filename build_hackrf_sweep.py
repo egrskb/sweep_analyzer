@@ -31,6 +31,11 @@ ffibuilder.cdef(
     int hackrf_set_baseband_filter_bandwidth(hackrf_device* device, uint32_t bandwidth);
     int hackrf_set_vga_gain(hackrf_device* device, uint32_t gain);
     int hackrf_set_lna_gain(hackrf_device* device, uint32_t gain);
+    int hackrf_set_freq(hackrf_device* device, uint64_t freq_hz);
+
+    int hackrf_start_rx(hackrf_device* device,
+                        int (*callback)(hackrf_transfer*), void* ctx);
+    int hackrf_stop_rx(hackrf_device* device);
 
     int hackrf_init_sweep(hackrf_device* device, uint16_t* freqs, int num_ranges,
                           uint32_t num_bytes, uint32_t step, uint32_t offset, uint8_t style);
