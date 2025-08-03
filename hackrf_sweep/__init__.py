@@ -22,6 +22,6 @@ def _load_extension() -> None:
 
 _load_extension()
 
-from .core import start_sweep, load_config
+from .core import start_sweep, load_config, measure_rssi
 
-__all__ = ["start_sweep", "load_config"]
+__all__ = ["start_sweep", "load_config", "measure_rssi"]

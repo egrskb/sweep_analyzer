@@ -7,7 +7,8 @@ A minimal Python package that wraps a subset of the HackRF sweep API via [CFFI](
 - Declarative sweep configuration loaded from `config.json`
 - FFT processing implemented in C using FFTW for performance
 - Double‑buffered sweep storage to avoid copying in the Python callback
-- Simple example that prints the peak frequency of each sweep row
+- Baseline capture and threshold comparison in the example scanner
+- Optional RSSI readings from additional HackRF devices
 
 ## Requirements
 
@@ -77,7 +78,9 @@ start_sweep(handle_sweep)
 
 ## Example scanner
 
-The repository includes `example.py` which demonstrates how to detect spectral peaks:
+The repository includes `example.py` which records a baseline sweep, detects
+bins rising more than 10 dB above it, and (if extra HackRFs are connected)
+reports their RSSI at the same frequencies:
 
 ```bash
 python example.py
@@ -89,7 +92,9 @@ The script lists connected HackRF devices, chooses the first as master, and prin
 Пик на частоте 100.00 МГц: 42.3 дБ
 ```
 
-indicating the frequency and power of the strongest bin in each sweep step.  Interrupt with `Ctrl+C` to stop.
+indicating the frequency and power of peaks relative to the baseline.  If
+slaves are present, their RSSI readings are appended.  Interrupt with
+`Ctrl+C` to stop.
 
 ## Development notes
 

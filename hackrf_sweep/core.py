@@ -42,6 +42,13 @@ _active_buf = 0
 
 _callback: Callable[[np.ndarray], None]
 
+# Additional HackRF devices opened as slaves for RSSI measurements.
+_slaves: list[ffi.CData] = []
+
+# Temporary storage used by the RSSI callback.
+_rssi_result: float = 0.0
+_rssi_done: bool = False
+
 
 def load_config(path: str = "config.json") -> dict:
     """Load sweep parameters from a JSON file."""
@@ -64,6 +71,35 @@ def _rx_callback(transfer) -> int:
         _active_buf ^= 1
         _callback(_buffers[ready])
     return 0
+
+
+@ffi.callback("int(hackrf_transfer*)")
+def _rssi_callback(transfer) -> int:
+    """Collect a single buffer of IQ samples and compute its power."""
+    global _rssi_result, _rssi_done
+    buf = ffi.buffer(transfer.buffer, transfer.valid_length)
+    # Convert interleaved int8 IQ samples to float and compute mean power.
+    iq = np.frombuffer(buf, dtype=np.int8).astype(np.float32).reshape(-1, 2)
+    power = np.mean(iq ** 2)
+    # Convert to dB, protecting against log(0).
+    _rssi_result = 10 * np.log10(power + 1e-12)
+    _rssi_done = True
+    return 0
+
+
+def measure_rssi(freq_hz: float) -> list[float]:
+    """Measure RSSI at ``freq_hz`` using all slave devices."""
+    results: list[float] = []
+    for dev in _slaves:
+        lib.hackrf_set_freq(dev, int(freq_hz))
+        global _rssi_done
+        _rssi_done = False
+        lib.hackrf_start_rx(dev, _rssi_callback, ffi.NULL)
+        while not _rssi_done:
+            time.sleep(0.01)
+        lib.hackrf_stop_rx(dev)
+        results.append(_rssi_result)
+    return results
 
 
 def start_sweep(
@@ -100,12 +136,37 @@ def start_sweep(
     if lib.hackrf_init() != 0:
         raise RuntimeError("hackrf_init failed")
 
+    # Enumerate connected devices and open master/slave units.
+    dev_list = lib.hackrf_device_list()
+    serials = [
+        ffi.string(dev_list.serial_numbers[i]).decode()
+        for i in range(dev_list.devicecount)
+    ]
+    lib.hackrf_device_list_free(dev_list)
+
+    if not serials:
+        lib.hackrf_exit()
+        raise RuntimeError("HackRF device not found")
+
+    master_serial = serial or serials[0]
+    slave_serials = [s for s in serials if s != master_serial][:2]
+
     dev_pp = ffi.new("hackrf_device **")
-    ser = serial.encode() if serial is not None else ffi.NULL
-    if lib.hackrf_open_by_serial(ser, dev_pp) != 0:
+    if lib.hackrf_open_by_serial(master_serial.encode(), dev_pp) != 0:
         lib.hackrf_exit()
         raise RuntimeError("hackrf_open_by_serial failed")
     dev = dev_pp[0]
+
+    # Open slave devices.
+    _slaves.clear()
+    for s in slave_serials:
+        pp = ffi.new("hackrf_device **")
+        if lib.hackrf_open_by_serial(s.encode(), pp) == 0:
+            lib.hackrf_set_sample_rate_manual(pp[0], sample_rate, 1)
+            lib.hackrf_set_baseband_filter_bandwidth(pp[0], bandwidth)
+            lib.hackrf_set_vga_gain(pp[0], vga_gain)
+            lib.hackrf_set_lna_gain(pp[0], lna_gain)
+            _slaves.append(pp[0])
 
     try:
         lib.hackrf_set_sample_rate_manual(dev, sample_rate, 1)
@@ -136,6 +197,8 @@ def start_sweep(
         except KeyboardInterrupt:
             pass
     finally:
+        for s in _slaves:
+            lib.hackrf_close(s)
         lib.hackrf_close(dev)
         lib.hackrf_exit()
         lib.hs_cleanup()

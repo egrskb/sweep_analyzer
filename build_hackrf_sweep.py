@@ -37,6 +37,11 @@ ffibuilder.cdef(
                               int (*callback)(hackrf_transfer*), void* ctx);
     int hackrf_is_streaming(hackrf_device* device);
 
+    int hackrf_set_freq(hackrf_device* device, uint64_t freq_hz);
+    int hackrf_start_rx(hackrf_device* device,
+                        int (*callback)(hackrf_transfer*), void* ctx);
+    int hackrf_stop_rx(hackrf_device* device);
+
     enum hackrf_usb_board_id {
         USB_BOARD_ID_JAWBREAKER = 0x604B,
         USB_BOARD_ID_HACKRF_ONE = 0x6089,
