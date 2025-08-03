@@ -1,22 +1,21 @@
-"""Minimal HackRF sweep Python package.
+"""Простейший Python-пакет для свипа HackRF.
 
-This package expects the CFFI extension :mod:`hackrf_sweep._lib` to be
-available. Build it by running ``python build_hackrf_sweep.py`` before
-importing :func:`start_sweep`.
+Перед использованием нужно собрать расширение CFFI
+``hackrf_sweep._lib`` командой ``python build_hackrf_sweep.py``.
 """
 
 from importlib import import_module
 
 
 def _load_extension() -> None:
-    """Import the compiled CFFI extension if it exists."""
+    """Импортировать собранное CFFI‑расширение."""
 
     try:  # pragma: no cover - exercised when module is missing
         import_module("hackrf_sweep._lib")
     except ModuleNotFoundError:  # pragma: no cover
         raise ImportError(
-            "hackrf_sweep._lib not found. Run 'python build_hackrf_sweep.py' to "
-            "compile the extension before using this package."
+            "hackrf_sweep._lib не найден. Запустите 'python build_hackrf_sweep.py' "
+            "перед использованием пакета."
         ) from None
 
 

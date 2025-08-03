@@ -1,9 +1,8 @@
-"""High level interface for performing HackRF sweep and processing data.
+"""Простая обёртка для свипа HackRF и обработки данных.
 
-This module provides :func:`start_sweep` which initialises the HackRF
-hardware, sets up a sweep and processes each sweep with a Python
-callback.  The implementation is intentionally minimal and only aims to
-illustrate how the C API may be wrapped using :mod:`cffi`.
+Функция :func:`start_sweep` настраивает устройство, запускает свип
+и вызывает переданный коллбэк для каждого готового свипа. Код минимален и
+показывает, как обернуть C API через модуль :mod:`cffi`.
 """
 
 from __future__ import annotations
@@ -21,21 +20,19 @@ from . import _lib  # type: ignore
 ffi = _lib.ffi
 lib = _lib.lib
 
-# Default scanning parameters -------------------------------------------------
-DEFAULT_SAMPLE_RATE = int(20e6)
-DEFAULT_BANDWIDTH = int(15e6)
+# --------------------------- параметры по умолчанию ---------------------------
+DEFAULT_SAMPLE_RATE = int(20e6)  # частота дискретизации
+DEFAULT_BANDWIDTH = int(15e6)    # полоса фильтра
 
-# Size of FFT performed for each block.
+# Размер FFT для одного блока
 FFT_SIZE = 256
 
-# Mutable sweep configuration.  ``start_sweep`` updates these globals so that
-# the callback knows how many steps to expect and what frequencies they map to.
+# Текущее описание свипа. start_sweep изменяет эти значения
 STEP_COUNT = 16
 _freq_start_mhz = 0.0
 _step_mhz = 1.0
 
-# Double buffers holding power values for sweeps.  We flip between them each
-# time a sweep completes to avoid copying data for the Python callback.
+# Двойной буфер с результатами. Переключаемся между буферами чтобы не копировать
 _buffers = [np.zeros((STEP_COUNT, FFT_SIZE), dtype=np.float32),
             np.zeros((STEP_COUNT, FFT_SIZE), dtype=np.float32)]
 _buffer_ptrs = [ffi.cast("float *", _buffers[0].ctypes.data),
@@ -44,32 +41,29 @@ _active_buf = 0
 
 _callback: Callable[[np.ndarray], None]
 
-# Additional HackRF devices opened as slaves for RSSI measurements.
+# Список дополнительных плат для измерения RSSI
 _slaves: list[ffi.CData] = []
 
-# Temporary storage used by the RSSI callback.
+# Временное хранилище для значения RSSI
 _rssi_result: float = 0.0
 _rssi_event = Event()
 
-# Empirical offset that roughly converts the FFT magnitudes into the dBm
-# range.  The exact value depends on hardware calibration and is only intended
-# to provide a stable reference for distance estimation.
+# Поправка переводящая мощность FFT в дБм (подбирается экспериментально)
 RSSI_OFFSET_DBM = -70.0
 
 
 def load_config(path: str = "config.json") -> dict:
-    """Load sweep parameters from a JSON file."""
+    """Загрузить настройки свипа из JSON файла."""
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
 @ffi.callback("int(hackrf_transfer*)")
 def _rx_callback(transfer) -> int:
-    """C callback passed to ``hackrf_start_rx_sweep``.
+    """C-коллбэк для ``hackrf_start_rx_sweep``.
 
-    The heavy FFT processing is implemented in C for efficiency.  This
-    callback merely forwards the incoming buffer to the native routine
-    and invokes the Python handler when a full sweep has been collected.
+    Функция передаёт буфер в C-код, который делает FFT. Когда полный свип
+    готов, вызывается переданный Python-обработчик.
     """
     global _active_buf
     finished = lib.hs_process(transfer, _buffer_ptrs[_active_buf])
@@ -82,27 +76,27 @@ def _rx_callback(transfer) -> int:
 
 @ffi.callback("int(hackrf_transfer*)")
 def _rssi_callback(transfer) -> int:
-    """Collect a single buffer of IQ samples and compute its power."""
+    """Принять один буфер IQ и посчитать его мощность."""
     global _rssi_result
     buf = ffi.buffer(transfer.buffer, transfer.valid_length)
-    # Convert interleaved int8 IQ samples to float.
+    # Переводим чередующиеся int8 I/Q в float
     iq = (
         np.frombuffer(buf, dtype=np.int8)
         .astype(np.float32)
         .reshape(-1, 2)
     )
-    # Remove DC offset and normalise to the [-1, 1] range.
+    # Убираем постоянную составляющую и нормируем к [-1, 1]
     iq -= iq.mean(axis=0)
     iq /= 128.0
     power = np.mean(iq ** 2)
-    # Convert to dBm, protecting against log(0).
+    # Переводим в дБм, защищаясь от log(0)
     _rssi_result = 10 * np.log10(power + 1e-12) + RSSI_OFFSET_DBM
     _rssi_event.set()
     return 0
 
 
 def measure_rssi(freq_hz: float) -> list[float]:
-    """Measure RSSI at ``freq_hz`` using all slave devices."""
+    """Измерить RSSI на частоте ``freq_hz`` на всех slave-платах."""
     results: list[float] = []
     for dev in _slaves:
         lib.hackrf_set_freq(dev, int(freq_hz))
@@ -119,7 +113,7 @@ def start_sweep(
     config_path: str = "config.json",
     serial: Optional[str] = None,
 ) -> None:
-    """Start sweeping with HackRF and call ``callback`` for each sweep."""
+    """Запустить свип и вызывать ``callback`` для каждого готового свипа."""
 
     global _callback, STEP_COUNT, _buffers, _buffer_ptrs, _freq_start_mhz, _step_mhz, _active_buf
 
@@ -148,7 +142,7 @@ def start_sweep(
     if lib.hackrf_init() != 0:
         raise RuntimeError("hackrf_init failed")
 
-    # Enumerate connected devices and open master/slave units.
+    # Определяем подключённые устройства и открываем мастер и слейвы
     dev_list = lib.hackrf_device_list()
     serials = [
         ffi.string(dev_list.serial_numbers[i]).decode()
@@ -169,7 +163,7 @@ def start_sweep(
         raise RuntimeError("hackrf_open_by_serial failed")
     dev = dev_pp[0]
 
-    # Open slave devices.
+    # Открываем слейвы
     _slaves.clear()
     for s in slave_serials:
         pp = ffi.new("hackrf_device **")
@@ -214,4 +208,3 @@ def start_sweep(
         lib.hackrf_close(dev)
         lib.hackrf_exit()
         lib.hs_cleanup()
-
