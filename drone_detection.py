@@ -143,17 +143,19 @@ def process_sweep(sweep: np.ndarray) -> None:
 
     std = HISTORY.std(axis=0)
     diff = sweep - BASELINE
+    mask_up = diff >= THRESHOLD_DB
+    mask_down = diff <= -THRESHOLD_DB
 
     alerts = False
 
-    for step_idx in range(diff.shape[0]):
-        diff_row = diff[step_idx]
+    rows = np.where(mask_up.any(axis=1) | mask_down.any(axis=1))[0]
+    for step_idx in rows:
         base_row = BASELINE[step_idx]
         current_row = sweep[step_idx]
         std_row = std[step_idx]
 
-        up_segments = _segments(diff_row >= THRESHOLD_DB)
-        down_segments = _segments(diff_row <= -THRESHOLD_DB)
+        up_segments = _segments(mask_up[step_idx])
+        down_segments = _segments(mask_down[step_idx])
         for segments, sign in ((up_segments, "+"), (down_segments, "-")):
             for start_idx, end_idx in segments:
                 base_seg = base_row[start_idx:end_idx]

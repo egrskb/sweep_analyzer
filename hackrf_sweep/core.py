@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import os
 import time
-from threading import Event, Thread
+from threading import Event
 from typing import Callable, Optional
 
 import numpy as np
@@ -41,25 +41,8 @@ _active_buf = 0
 
 _callback: Callable[[np.ndarray], None]
 
-# Список дополнительных плат для измерения RSSI
-_slaves: list[ffi.CData] = []
-
-# Поправка переводящая мощность FFT в дБм (подбирается экспериментально)
-RSSI_OFFSET_DBM = -70.0
-
-
-def _top3_mean(arr: np.ndarray) -> float:
-    """Найти максимальное среднее по трём подряд идущим бинам."""
-    if arr.size < 3:
-        return float(arr.mean())
-    window_sum = float(arr[0] + arr[1] + arr[2])
-    max_mean = window_sum / 3.0
-    for i in range(3, arr.size):
-        window_sum += float(arr[i] - arr[i - 3])
-        mean = window_sum / 3.0
-        if mean > max_mean:
-            max_mean = mean
-    return max_mean
+# Список слейвов: каждая запись содержит устройство и словарь с состоянием
+_slaves: list[tuple[ffi.CData, dict]] = []
 
 
 def load_config(path: str = "config.json") -> dict:
@@ -86,56 +69,30 @@ def _rx_callback(transfer) -> int:
 
 @ffi.callback("int(hackrf_transfer*)")
 def _rssi_callback(transfer) -> int:
-    """Принять буфер IQ, сделать FFT и вернуть среднее по трём пикам."""
-    data = ffi.from_handle(transfer.rx_ctx)
-    buf = ffi.buffer(transfer.buffer, transfer.valid_length)
-    iq = (
-        np.frombuffer(buf, dtype=np.int8).astype(np.float32).reshape(-1, 2)
-    )
-    # Убираем постоянную составляющую и нормируем амплитуду
-    iq -= iq.mean(axis=0)
-    iq /= 128.0
-    # Окно Ханна
-    win = np.hanning(len(iq))
-    sig = (iq[:, 0] + 1j * iq[:, 1]) * win
-    fft = np.fft.fft(sig)
-    pwr = np.abs(fft) ** 2
-    p_dbm = 10 * np.log10(pwr + 1e-12) + RSSI_OFFSET_DBM
-    data["result"] = _top3_mean(p_dbm)
-    data["event"].set()
+    """Коллбэк для слейвов: C-код считает FFT, мы лишь забираем результат."""
+    ctx = ffi.from_handle(transfer.rx_ctx)
+    if not ctx["pending"]:
+        return 0
+    ctx["pending"] = False
+    ctx["result"] = lib.hs_rssi(transfer)
+    ctx["event"].set()
     return 0
 
 
 def measure_rssi(freq_hz: float) -> tuple[float, list[float]]:
-    """Измерить RSSI на частоте ``freq_hz`` на всех slave-платах.
-
-    Возвращает отметку времени и список значений RSSI.
-    """
-    timestamp = time.time()
-    results: list[float] = [0.0] * len(_slaves)
-    threads: list[Thread] = []
-    ctxs = []
-
-    def worker(dev: ffi.CData, ctx, idx: int) -> None:
+    """Попросить все слейвы измерить уровень на ``freq_hz``."""
+    ts = time.time()
+    results: list[float] = []
+    # Для каждого слейва даём команду настроиться на частоту
+    for dev, ctx in _slaves:
+        ctx["event"].clear()
+        ctx["pending"] = True  # сигнал для коллбэка, что нужно вернуть результат
         lib.hackrf_set_freq(dev, int(freq_hz))
-        lib.hackrf_start_rx(dev, _rssi_callback, ctx)
-        data = ffi.from_handle(ctx)
-        data["event"].wait()
-        lib.hackrf_stop_rx(dev)
-        results[idx] = data["result"]
-
-    for i, dev in enumerate(_slaves):
-        event = Event()
-        ctx = ffi.new_handle({"event": event, "result": 0.0})
-        ctxs.append(ctx)
-        t = Thread(target=worker, args=(dev, ctx, i))
-        threads.append(t)
-        t.start()
-
-    for t in threads:
-        t.join()
-
-    return timestamp, results
+    # Ждём пока каждый слейв обработает один блок и сообщит уровень
+    for dev, ctx in _slaves:
+        ctx["event"].wait()
+        results.append(ctx["result"])
+    return ts, results
 
 
 def start_sweep(
@@ -202,7 +159,12 @@ def start_sweep(
             lib.hackrf_set_baseband_filter_bandwidth(pp[0], bandwidth)
             lib.hackrf_set_vga_gain(pp[0], vga_gain)
             lib.hackrf_set_lna_gain(pp[0], lna_gain)
-            _slaves.append(pp[0])
+            ctx = {"event": Event(), "result": 0.0, "pending": False, "freq": 0}
+            handle = ffi.new_handle(ctx)
+            if lib.hackrf_start_rx(pp[0], _rssi_callback, handle) == 0:
+                _slaves.append((pp[0], ctx))
+            else:
+                lib.hackrf_close(pp[0])
 
     try:
         lib.hackrf_set_sample_rate_manual(dev, sample_rate, 1)
@@ -228,13 +190,15 @@ def start_sweep(
             raise RuntimeError("hackrf_start_rx_sweep failed")
 
         try:
-            while lib.hackrf_is_streaming(dev):
-                time.sleep(0.1)
+            # Ждём завершения, пока пользователь не нажмёт Ctrl+C
+            Event().wait()
         except KeyboardInterrupt:
             pass
     finally:
-        for s in _slaves:
+        for s, _ in _slaves:
+            lib.hackrf_stop_rx(s)
             lib.hackrf_close(s)
+        lib.hackrf_stop_rx_sweep(dev)
         lib.hackrf_close(dev)
         lib.hackrf_exit()
         lib.hs_cleanup()

@@ -61,6 +61,7 @@ ffibuilder.cdef(
 
     void hs_prepare(int fft_size, int step_count, int threads);
     int hs_process(hackrf_transfer* transfer, float* sweep_buffer);
+    float hs_rssi(hackrf_transfer* transfer);
     void hs_cleanup(void);
     """
 )
@@ -71,6 +72,7 @@ ffibuilder.set_source(
     #include <libhackrf/hackrf.h>
     void hs_prepare(int, int, int);
     int hs_process(hackrf_transfer*, float*);
+    float hs_rssi(hackrf_transfer*);
     void hs_cleanup(void);
     """,
     sources=["sweep_callback.c"],
