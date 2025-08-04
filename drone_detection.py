@@ -77,11 +77,22 @@ def _segments(mask: np.ndarray) -> List[Tuple[int, int]]:
 
 
 def _top3_mean(arr: np.ndarray) -> float:
-    """Вернуть среднее значение трёх самых больших элементов."""
-    if arr.size >= 3:
-        top = np.partition(arr, -3)[-3:]
-        return float(top.mean())
-    return float(arr.mean())
+    """Вернуть максимальное среднее по трём подряд идущим бинам."""
+    if arr.size < 3:
+        return float(arr.mean())
+
+    # Сумма первых трёх элементов
+    window_sum = float(arr[0] + arr[1] + arr[2])
+    max_mean = window_sum / 3.0
+
+    # Двигаем окно и ищем максимальное среднее
+    for i in range(3, arr.size):
+        window_sum += float(arr[i] - arr[i - 3])
+        mean = window_sum / 3.0
+        if mean > max_mean:
+            max_mean = mean
+
+    return max_mean
 
 
 def _update_tracked() -> None:
