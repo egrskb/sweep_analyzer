@@ -161,6 +161,7 @@ def start_sweep(
             lib.hackrf_set_lna_gain(pp[0], lna_gain)
             ctx = {"event": Event(), "result": 0.0, "pending": False, "freq": 0}
             handle = ffi.new_handle(ctx)
+            ctx["handle"] = handle  # держим ссылку, чтобы GC не удалил
             if lib.hackrf_start_rx(pp[0], _rssi_callback, handle) == 0:
                 _slaves.append((pp[0], ctx))
             else:
