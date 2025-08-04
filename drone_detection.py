@@ -21,6 +21,7 @@ from hackrf_sweep.core import FFT_SIZE, ffi, lib
 # -------------------------- параметры из конфигурации -------------------------
 CONFIG = load_config()
 START_MHZ = CONFIG["freq_start_mhz"]
+STOP_MHZ = CONFIG["freq_stop_mhz"]
 STEP_MHZ = CONFIG["step_mhz"]
 BIN_WIDTH_MHZ = CONFIG["sample_rate"] / FFT_SIZE / 1e6
 
@@ -95,19 +96,32 @@ def _top3_mean(arr: np.ndarray) -> float:
     return max_mean
 
 
+def _refresh_range(key: Tuple[float, float], info: Dict[str, Any]) -> None:
+    """Измерить уровень на диапазоне и обновить запись.
+
+    Запускается в отдельном потоке, чтобы не блокировать другие диапазоны."""
+    start, end = key
+    freq_hz = ((start + end) / 2) * 1e6
+    ts, slave_vals = measure_rssi(freq_hz)
+    info["slaves"] = slave_vals
+    info["timestamp"] = ts
+    if slave_vals:
+        slave_str = "".join(
+            f" | SDR slave {i+1}: {val:.1f} dBm" for i, val in enumerate(slave_vals)
+        )
+        print(f"[t] Диапазон: {start:.0f} - {end:.0f} МГц{slave_str}")
+
+
 def _update_tracked() -> None:
     """Каждую секунду обновлять RSSI для уже известных диапазонов."""
     while True:
-        for (start, end), info in list(TRACKED.items()):
-            freq_hz = ((start + end) / 2) * 1e6
-            ts, slave_vals = measure_rssi(freq_hz)
-            info["slaves"] = slave_vals
-            info["timestamp"] = ts
-            if slave_vals:
-                slave_str = "".join(
-                    f" | SDR slave {i+1}: {val:.1f} dBm" for i, val in enumerate(slave_vals)
-                )
-                print(f"[t] Диапазон: {start:.0f} - {end:.0f} МГц{slave_str}")
+        threads: List[Thread] = []
+        for key, info in list(TRACKED.items()):
+            t = Thread(target=_refresh_range, args=(key, info), daemon=True)
+            t.start()
+            threads.append(t)
+        for t in threads:
+            t.join()
         time.sleep(1)
 
 # ------------------------------ обработка свипа -----------------------------
@@ -141,6 +155,7 @@ def process_sweep(sweep: np.ndarray) -> None:
         print(f"[i] Время свипа: {cycle:.2f} с")
         return
 
+    print("[i] Считаем отклонения...")
     std = HISTORY.std(axis=0)
     diff = sweep - BASELINE
     mask_up = diff >= THRESHOLD_DB
@@ -228,6 +243,9 @@ if __name__ == "__main__":
             print(f"SDR slave - {s}")
     else:
         print("SDR slave - нет")
+    print(
+        f"Диапазон сканирования: {START_MHZ:.0f} - {STOP_MHZ:.0f} МГц | шаг {STEP_MHZ:.0f} МГц"
+    )
     updater = Thread(target=_update_tracked, daemon=True)
     updater.start()
 
