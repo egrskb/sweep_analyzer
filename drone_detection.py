@@ -1,10 +1,10 @@
 """Пример поиска подозрительных диапазонов.
 
 Мастер HackRF проходит весь диапазон, запоминает средний уровень шума
-по первым пяти свипам и затем отслеживает участки из трёх и более соседних
-бинов, где средний RSSI отличается на 10 дБ и более. Для каждого такого
-диапазона выводится его средний уровень и измерения с двух дополнительных
-плат (если они подключены).
+по первым пяти свипам и затем отслеживает участки из нескольких соседних
+бинов, где средний RSSI отличается от baseline на заданное в конфигурации
+значение. Для каждого диапазона выводится его средний уровень и измерения
+с двух дополнительных плат (если они подключены).
 """
 
 from __future__ import annotations
@@ -25,10 +25,18 @@ STOP_MHZ = CONFIG["freq_stop_mhz"]
 STEP_MHZ = CONFIG["step_mhz"]
 BIN_WIDTH_MHZ = CONFIG["sample_rate"] / FFT_SIZE / 1e6
 
-THRESHOLD_DB = 10.0          # порог изменения
-IGNORE_LEVEL_DBM = -100.0    # значения ниже считаем шумом
-BASELINE_SWEEPS = 5          # сколько свипов усреднять
-HISTORY_LEN = 10             # глубина истории для статистики
+# Порог отклонения от baseline в дБ
+THRESHOLD_DB = CONFIG.get("threshold_db", 10.0)
+# Уровень, ниже которого считаем шумом
+IGNORE_LEVEL_DBM = CONFIG.get("ignore_level_dbm", -100.0)
+# Минимум подряд идущих бинов для уверенного сигнала
+MIN_BINS = int(CONFIG.get("min_bins", 3))
+# Максимально допустимое стандартное отклонение в дБ
+STDDEV_MAX_DB = CONFIG.get("stddev_max_db", 5.0)
+# Сколько первых свипов усреднять для baseline
+BASELINE_SWEEPS = 5
+# Глубина истории для статистики
+HISTORY_LEN = 10
 
 # ----------------------------- рабочие переменные ---------------------------
 BASELINE_ACCUM: np.ndarray | None = None
@@ -62,17 +70,16 @@ def list_serials() -> List[Optional[str]]:
         lib.hackrf_exit()
 
 def _segments(mask: np.ndarray) -> List[Tuple[int, int]]:
-    """Вернуть списки индексов подряд идущих True длиной ≥3."""
+    """Вернуть интервалы подряд идущих значений True."""
     segs: List[Tuple[int, int]] = []
     start = None
     for i, val in enumerate(mask):
         if val and start is None:
             start = i
         elif not val and start is not None:
-            if i - start >= 3:
-                segs.append((start, i))
+            segs.append((start, i))
             start = None
-    if start is not None and len(mask) - start >= 3:
+    if start is not None:
         segs.append((start, len(mask)))
     return segs
 
@@ -143,6 +150,7 @@ def process_sweep(sweep: np.ndarray) -> None:
         BASELINE_COUNT += 1
         if BASELINE_COUNT == BASELINE_SWEEPS:
             BASELINE = BASELINE_ACCUM / BASELINE_SWEEPS
+            np.save("baseline.npy", BASELINE)
             print("baseline определен")
         return
 
@@ -155,6 +163,7 @@ def process_sweep(sweep: np.ndarray) -> None:
         print(f"[i] Время свипа: {cycle:.2f} с")
         return
 
+    np.save("curr_sweep.npy", sweep)
     print("[i] Считаем отклонения...")
     std = HISTORY.std(axis=0)
     diff = sweep - BASELINE
@@ -173,13 +182,16 @@ def process_sweep(sweep: np.ndarray) -> None:
         down_segments = _segments(mask_down[step_idx])
         for segments, sign in ((up_segments, "+"), (down_segments, "-")):
             for start_idx, end_idx in segments:
+                seg_len = end_idx - start_idx
+                if seg_len < MIN_BINS and seg_len > 2:
+                    continue
                 base_seg = base_row[start_idx:end_idx]
                 curr_seg = current_row[start_idx:end_idx]
                 mean_base = _top3_mean(base_seg)
                 mean_curr = _top3_mean(curr_seg)
                 if mean_base < IGNORE_LEVEL_DBM and mean_curr < IGNORE_LEVEL_DBM:
                     continue
-                if std_row[start_idx:end_idx].mean() > 2:
+                if std_row[start_idx:end_idx].mean() > STDDEV_MAX_DB:
                     continue
                 if abs(mean_curr - mean_base) < THRESHOLD_DB:
                     continue

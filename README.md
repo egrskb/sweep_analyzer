@@ -55,11 +55,15 @@ Sweep parameters are read from `config.json` in the project root.  The default f
   "step_mhz": 5.0,
   "vga_gain": 20,
   "lna_gain": 16,
-  "fft_threads": 1
+  "fft_threads": 1,
+  "threshold_db": 10.0,
+  "ignore_level_dbm": -100.0,
+  "min_bins": 3,
+  "stddev_max_db": 5.0
 }
 ```
 
-Changing values in this file lets you control sweep range, step size, gain, and FFT threading without modifying code.
+Changing values in this file lets you control sweep range, step size, gain, FFT threading, and detection thresholds without modifying code.
 
 ## Using the library
 
