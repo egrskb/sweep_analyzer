@@ -5,6 +5,5 @@
   "freq_stop_mhz": 6000.0,
   "step_mhz": 5.0,
   "vga_gain": 20,
-  "lna_gain": 16,
-  "fft_threads": 1
+  "lna_gain": 16
 }

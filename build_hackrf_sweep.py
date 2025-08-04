@@ -75,6 +75,7 @@ ffibuilder.set_source(
     """,
     sources=["sweep_callback.c"],
     libraries=["hackrf", "usb-1.0", "fftw3f", "fftw3f_threads", "pthread"],
+    extra_compile_args=["-O3"],
 )
 
 if __name__ == "__main__":

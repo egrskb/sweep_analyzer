@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import time
+from threading import Thread
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -73,6 +74,21 @@ def _segments(mask: np.ndarray) -> List[Tuple[int, int]]:
     if start is not None and len(mask) - start >= 3:
         segs.append((start, len(mask)))
     return segs
+
+
+def _update_tracked() -> None:
+    """Каждую секунду обновлять RSSI для уже известных диапазонов."""
+    while True:
+        for (start, end), info in list(TRACKED.items()):
+            freq_hz = ((start + end) / 2) * 1e6
+            slave_vals = measure_rssi(freq_hz)
+            info["slaves"] = slave_vals
+            if slave_vals:
+                slave_str = "".join(
+                    f" | SDR slave {i+1}: {val:.1f} dBm" for i, val in enumerate(slave_vals)
+                )
+                print(f"[t] Диапазон: {start:.0f} - {end:.0f} МГц{slave_str}")
+        time.sleep(1)
 
 # ------------------------------ обработка свипа -----------------------------
 
@@ -180,5 +196,7 @@ if __name__ == "__main__":
             print(f"SDR slave - {s}")
     else:
         print("SDR slave - нет")
+    updater = Thread(target=_update_tracked, daemon=True)
+    updater.start()
 
     start_sweep(process_sweep, serial=master)
