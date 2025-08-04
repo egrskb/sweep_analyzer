@@ -132,13 +132,14 @@ def _refresh_range(key: Tuple[float, float], info: Dict[str, Any]) -> None:
     ts, slave_vals = measure_rssi(freq_hz)
     info["slaves"] = slave_vals
     info["timestamp"] = ts
-    delta = info["master"] - info["baseline"]
-    slave_str = "".join(
-        f" | SDR slave {i+1}: {val:.1f} dBm" for i, val in enumerate(slave_vals)
-    )
-    print(
-        f"[t] Диапазон: {start:.0f} - {end:.0f} МГц | прирост master {delta:+.1f} дБ{slave_str}"
-    )
+    if info.get("class"):
+        delta = info["master"] - info["baseline"]
+        slave_str = "".join(
+            f" | SDR slave {i+1}: {val:.1f} dBm" for i, val in enumerate(slave_vals)
+        )
+        print(
+            f"[t] Диапазон: {start:.0f} - {end:.0f} МГц | прирост master {delta:+.1f} дБ{slave_str}"
+        )
 
 
 def _update_tracked() -> None:
@@ -240,22 +241,21 @@ def process_sweep(sweep: np.ndarray) -> None:
                     tracked["idx"] = (step_idx, start_idx, end_idx)
                     tracked["count"] += 1
 
-                delta = mean_curr - mean_base
                 info = TRACKED[key]
                 label = info.get("class")
-                msg = (
-                    f"[{sign}] Диапазон: {key_start:.0f} - {key_end:.0f} МГц | прирост {delta:+.1f} дБ"
-                )
                 if label:
-                    msg += f" | {label}"
-                if info["count"] > 3:
-                    msg += " | устойчивый сигнал"
-                slave_str = "".join(
-                    f" | SDR slave {i+1}: {val:.1f} dBm" for i, val in enumerate(slave_vals)
-                )
-                msg += slave_str
-                print(msg)
-                alerts = True
+                    delta = mean_curr - mean_base
+                    msg = (
+                        f"[{sign}] Диапазон: {key_start:.0f} - {key_end:.0f} МГц | прирост {delta:+.1f} дБ | {label}"
+                    )
+                    if info["count"] > 3:
+                        msg += " | устойчивый сигнал"
+                    slave_str = "".join(
+                        f" | SDR slave {i+1}: {val:.1f} dBm" for i, val in enumerate(slave_vals)
+                    )
+                    msg += slave_str
+                    print(msg)
+                    alerts = True
 
     # Удаляем диапазоны, если уровень приблизился к baseline
     for key, info in list(TRACKED.items()):
