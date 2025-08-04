@@ -76,6 +76,14 @@ def _segments(mask: np.ndarray) -> List[Tuple[int, int]]:
     return segs
 
 
+def _top3_mean(arr: np.ndarray) -> float:
+    """Вернуть среднее значение трёх самых больших элементов."""
+    if arr.size >= 3:
+        top = np.partition(arr, -3)[-3:]
+        return float(top.mean())
+    return float(arr.mean())
+
+
 def _update_tracked() -> None:
     """Каждую секунду обновлять RSSI для уже известных диапазонов."""
     while True:
@@ -139,12 +147,12 @@ def process_sweep(sweep: np.ndarray) -> None:
             for start_idx, end_idx in segments:
                 base_seg = base_row[start_idx:end_idx]
                 curr_seg = current_row[start_idx:end_idx]
-                if base_seg.mean() < IGNORE_LEVEL_DBM and curr_seg.mean() < IGNORE_LEVEL_DBM:
+                mean_base = _top3_mean(base_seg)
+                mean_curr = _top3_mean(curr_seg)
+                if mean_base < IGNORE_LEVEL_DBM and mean_curr < IGNORE_LEVEL_DBM:
                     continue
                 if std_row[start_idx:end_idx].mean() > 2:
                     continue
-                mean_base = base_seg.mean()
-                mean_curr = curr_seg.mean()
                 key_start = START_MHZ + step_idx * STEP_MHZ + start_idx * BIN_WIDTH_MHZ
                 key_end = START_MHZ + step_idx * STEP_MHZ + end_idx * BIN_WIDTH_MHZ
                 key = (key_start, key_end)
