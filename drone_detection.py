@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 from threading import Thread
 from typing import Any, Dict, List, Optional, Tuple
@@ -51,6 +52,12 @@ HIST_FILLED = False
 TRACKED: Dict[Tuple[float, float], Dict[str, Any]] = {}
 
 _last_sweep_time = time.time()
+
+# Если baseline уже сохранён, загрузим его
+if os.path.exists("baseline.npy"):
+    BASELINE = np.load("baseline.npy")
+    HISTORY = np.zeros((HISTORY_LEN, *BASELINE.shape), dtype=np.float32)
+    BASELINE_COUNT = BASELINE_SWEEPS
 
 # ------------------------------- вспомогательные -----------------------------
 
@@ -103,32 +110,42 @@ def _top3_mean(arr: np.ndarray) -> float:
     return max_mean
 
 
-def _refresh_range(key: Tuple[float, float], info: Dict[str, Any]) -> None:
-    """Измерить уровень на диапазоне и обновить запись.
+def _classify(start: float, end: float) -> Optional[str]:
+    """Простая классификация диапазона по частоте и ширине."""
+    width = end - start
+    center = (start + end) / 2
+    if 5740 <= center <= 5820 and 15 <= width <= 25:
+        return "FPV видео"
+    if 2402 <= center <= 2483 and width <= 5:
+        return "дрон-телеметрия или Wi-Fi"
+    if abs(center - 433) <= 1 and width <= 2:
+        return "управляющий канал 433 МГц"
+    if abs(center - 868) <= 1 and width <= 2:
+        return "управляющий канал 868 МГц"
+    return None
 
-    Запускается в отдельном потоке, чтобы не блокировать другие диапазоны."""
+
+def _refresh_range(key: Tuple[float, float], info: Dict[str, Any]) -> None:
+    """Измерить уровень на диапазоне и обновить запись."""
     start, end = key
     freq_hz = ((start + end) / 2) * 1e6
     ts, slave_vals = measure_rssi(freq_hz)
     info["slaves"] = slave_vals
     info["timestamp"] = ts
-    if slave_vals:
-        slave_str = "".join(
-            f" | SDR slave {i+1}: {val:.1f} dBm" for i, val in enumerate(slave_vals)
-        )
-        print(f"[t] Диапазон: {start:.0f} - {end:.0f} МГц{slave_str}")
+    delta = info["master"] - info["baseline"]
+    slave_str = "".join(
+        f" | SDR slave {i+1}: {val:.1f} dBm" for i, val in enumerate(slave_vals)
+    )
+    print(
+        f"[t] Диапазон: {start:.0f} - {end:.0f} МГц | прирост master {delta:+.1f} дБ{slave_str}"
+    )
 
 
 def _update_tracked() -> None:
     """Каждую секунду обновлять RSSI для уже известных диапазонов."""
     while True:
-        threads: List[Thread] = []
         for key, info in list(TRACKED.items()):
-            t = Thread(target=_refresh_range, args=(key, info), daemon=True)
-            t.start()
-            threads.append(t)
-        for t in threads:
-            t.join()
+            _refresh_range(key, info)
         time.sleep(1)
 
 # ------------------------------ обработка свипа -----------------------------
@@ -140,6 +157,11 @@ def process_sweep(sweep: np.ndarray) -> None:
     now = time.time()
     cycle = now - _last_sweep_time
     _last_sweep_time = now
+
+    # Если baseline загружен заранее, но размер истории ещё не задан
+    global HISTORY
+    if BASELINE is not None and HISTORY.shape[1] == 0:
+        HISTORY = np.zeros((HISTORY_LEN, *sweep.shape), dtype=np.float32)
 
     # ----------- накопление baseline из первых пяти свипов -----------
     if BASELINE is None:
@@ -208,20 +230,31 @@ def process_sweep(sweep: np.ndarray) -> None:
                         "slaves": slave_vals,
                         "timestamp": ts,
                         "idx": (step_idx, start_idx, end_idx),
+                        "count": 1,
+                        "class": _classify(key_start, key_end),
                     }
                 else:
-                    TRACKED[key]["master"] = mean_curr
-                    TRACKED[key]["slaves"] = slave_vals
-                    TRACKED[key]["timestamp"] = ts
-                    TRACKED[key]["idx"] = (step_idx, start_idx, end_idx)
+                    tracked["master"] = mean_curr
+                    tracked["slaves"] = slave_vals
+                    tracked["timestamp"] = ts
+                    tracked["idx"] = (step_idx, start_idx, end_idx)
+                    tracked["count"] += 1
 
+                delta = mean_curr - mean_base
+                info = TRACKED[key]
+                label = info.get("class")
+                msg = (
+                    f"[{sign}] Диапазон: {key_start:.0f} - {key_end:.0f} МГц | прирост {delta:+.1f} дБ"
+                )
+                if label:
+                    msg += f" | {label}"
+                if info["count"] > 3:
+                    msg += " | устойчивый сигнал"
                 slave_str = "".join(
                     f" | SDR slave {i+1}: {val:.1f} dBm" for i, val in enumerate(slave_vals)
                 )
-                print(
-                    f"[{sign}] Диапазон: {key_start:.0f} - {key_end:.0f} МГц | "
-                    f"средний RSSI master: {mean_curr:.1f} dBm{slave_str}"
-                )
+                msg += slave_str
+                print(msg)
                 alerts = True
 
     # Удаляем диапазоны, если уровень приблизился к baseline

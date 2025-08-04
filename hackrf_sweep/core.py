@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import os
 import time
-from threading import Event
+from threading import Event, Lock
 from typing import Callable, Optional
 
 import numpy as np
@@ -43,6 +43,9 @@ _callback: Callable[[np.ndarray], None]
 
 # Список слейвов: каждая запись содержит устройство и словарь с состоянием
 _slaves: list[tuple[ffi.CData, dict]] = []
+
+# Блокировка, чтобы слейвы не измеряли частоту одновременно
+rssi_lock = Lock()
 
 
 def load_config(path: str = "config.json") -> dict:
@@ -79,19 +82,24 @@ def _rssi_callback(transfer) -> int:
     return 0
 
 
-def measure_rssi(freq_hz: float) -> tuple[float, list[float]]:
+def measure_rssi(freq_hz: float, timeout: float = 1.0) -> tuple[float, list[float]]:
     """Попросить все слейвы измерить уровень на ``freq_hz``."""
     ts = time.time()
     results: list[float] = []
-    # Для каждого слейва даём команду настроиться на частоту
-    for dev, ctx in _slaves:
-        ctx["event"].clear()
-        ctx["pending"] = True  # сигнал для коллбэка, что нужно вернуть результат
-        lib.hackrf_set_freq(dev, int(freq_hz))
-    # Ждём пока каждый слейв обработает один блок и сообщит уровень
-    for dev, ctx in _slaves:
-        ctx["event"].wait()
-        results.append(ctx["result"])
+    # Все операции выполняем под одной блокировкой
+    with rssi_lock:
+        # Настраиваем каждую плату на нужную частоту
+        for dev, ctx in _slaves:
+            ctx["event"].clear()
+            ctx["pending"] = True
+            lib.hackrf_set_freq(dev, int(freq_hz))
+        # Ждём результаты
+        for dev, ctx in _slaves:
+            if not ctx["event"].wait(timeout):
+                ctx["pending"] = False
+                results.append(float("nan"))
+            else:
+                results.append(ctx["result"])
     return ts, results
 
 
