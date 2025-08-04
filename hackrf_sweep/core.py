@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import os
 import time
-from threading import Event
+from threading import Event, Thread
 from typing import Callable, Optional
 
 import numpy as np
@@ -44,10 +44,6 @@ _callback: Callable[[np.ndarray], None]
 # Список дополнительных плат для измерения RSSI
 _slaves: list[ffi.CData] = []
 
-# Временное хранилище для значения RSSI
-_rssi_result: float = 0.0
-_rssi_event = Event()
-
 # Поправка переводящая мощность FFT в дБм (подбирается экспериментально)
 RSSI_OFFSET_DBM = -70.0
 
@@ -77,7 +73,7 @@ def _rx_callback(transfer) -> int:
 @ffi.callback("int(hackrf_transfer*)")
 def _rssi_callback(transfer) -> int:
     """Принять один буфер IQ и посчитать его мощность."""
-    global _rssi_result
+    data = ffi.from_handle(transfer.rx_ctx)
     buf = ffi.buffer(transfer.buffer, transfer.valid_length)
     # Переводим чередующиеся int8 I/Q в float
     iq = (
@@ -90,22 +86,41 @@ def _rssi_callback(transfer) -> int:
     iq /= 128.0
     power = np.mean(iq ** 2)
     # Переводим в дБм, защищаясь от log(0)
-    _rssi_result = 10 * np.log10(power + 1e-12) + RSSI_OFFSET_DBM
-    _rssi_event.set()
+    data["result"] = 10 * np.log10(power + 1e-12) + RSSI_OFFSET_DBM
+    data["event"].set()
     return 0
 
 
-def measure_rssi(freq_hz: float) -> list[float]:
-    """Измерить RSSI на частоте ``freq_hz`` на всех slave-платах."""
-    results: list[float] = []
-    for dev in _slaves:
+def measure_rssi(freq_hz: float) -> tuple[float, list[float]]:
+    """Измерить RSSI на частоте ``freq_hz`` на всех slave-платах.
+
+    Возвращает отметку времени и список значений RSSI.
+    """
+    timestamp = time.time()
+    results: list[float] = [0.0] * len(_slaves)
+    threads: list[Thread] = []
+    ctxs = []
+
+    def worker(dev: ffi.CData, ctx, idx: int) -> None:
         lib.hackrf_set_freq(dev, int(freq_hz))
-        _rssi_event.clear()
-        lib.hackrf_start_rx(dev, _rssi_callback, ffi.NULL)
-        _rssi_event.wait()
+        lib.hackrf_start_rx(dev, _rssi_callback, ctx)
+        data = ffi.from_handle(ctx)
+        data["event"].wait()
         lib.hackrf_stop_rx(dev)
-        results.append(_rssi_result)
-    return results
+        results[idx] = data["result"]
+
+    for i, dev in enumerate(_slaves):
+        event = Event()
+        ctx = ffi.new_handle({"event": event, "result": 0.0})
+        ctxs.append(ctx)
+        t = Thread(target=worker, args=(dev, ctx, i))
+        threads.append(t)
+        t.start()
+
+    for t in threads:
+        t.join()
+
+    return timestamp, results
 
 
 def start_sweep(

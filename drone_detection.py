@@ -81,8 +81,9 @@ def _update_tracked() -> None:
     while True:
         for (start, end), info in list(TRACKED.items()):
             freq_hz = ((start + end) / 2) * 1e6
-            slave_vals = measure_rssi(freq_hz)
+            ts, slave_vals = measure_rssi(freq_hz)
             info["slaves"] = slave_vals
+            info["timestamp"] = ts
             if slave_vals:
                 slave_str = "".join(
                     f" | SDR slave {i+1}: {val:.1f} dBm" for i, val in enumerate(slave_vals)
@@ -148,17 +149,19 @@ def process_sweep(sweep: np.ndarray) -> None:
                 key_end = START_MHZ + step_idx * STEP_MHZ + end_idx * BIN_WIDTH_MHZ
                 key = (key_start, key_end)
 
-                slave_vals = measure_rssi(((key_start + key_end) / 2) * 1e6)
+                ts, slave_vals = measure_rssi(((key_start + key_end) / 2) * 1e6)
                 tracked = TRACKED.get(key)
                 if not tracked:
                     TRACKED[key] = {
                         "baseline": mean_base,
                         "master": mean_curr,
                         "slaves": slave_vals,
+                        "timestamp": ts,
                     }
                 else:
                     TRACKED[key]["master"] = mean_curr
                     TRACKED[key]["slaves"] = slave_vals
+                    TRACKED[key]["timestamp"] = ts
 
                 if abs(mean_curr - TRACKED[key]["baseline"]) < THRESHOLD_DB:
                     del TRACKED[key]
