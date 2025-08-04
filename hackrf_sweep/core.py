@@ -48,6 +48,20 @@ _slaves: list[ffi.CData] = []
 RSSI_OFFSET_DBM = -70.0
 
 
+def _top3_mean(arr: np.ndarray) -> float:
+    """Найти максимальное среднее по трём подряд идущим бинам."""
+    if arr.size < 3:
+        return float(arr.mean())
+    window_sum = float(arr[0] + arr[1] + arr[2])
+    max_mean = window_sum / 3.0
+    for i in range(3, arr.size):
+        window_sum += float(arr[i] - arr[i - 3])
+        mean = window_sum / 3.0
+        if mean > max_mean:
+            max_mean = mean
+    return max_mean
+
+
 def load_config(path: str = "config.json") -> dict:
     """Загрузить настройки свипа из JSON файла."""
     with open(path, "r", encoding="utf-8") as f:
@@ -72,21 +86,22 @@ def _rx_callback(transfer) -> int:
 
 @ffi.callback("int(hackrf_transfer*)")
 def _rssi_callback(transfer) -> int:
-    """Принять один буфер IQ и посчитать его мощность."""
+    """Принять буфер IQ, сделать FFT и вернуть среднее по трём пикам."""
     data = ffi.from_handle(transfer.rx_ctx)
     buf = ffi.buffer(transfer.buffer, transfer.valid_length)
-    # Переводим чередующиеся int8 I/Q в float
     iq = (
-        np.frombuffer(buf, dtype=np.int8)
-        .astype(np.float32)
-        .reshape(-1, 2)
+        np.frombuffer(buf, dtype=np.int8).astype(np.float32).reshape(-1, 2)
     )
-    # Убираем постоянную составляющую и нормируем к [-1, 1]
+    # Убираем постоянную составляющую и нормируем амплитуду
     iq -= iq.mean(axis=0)
     iq /= 128.0
-    power = np.mean(iq ** 2)
-    # Переводим в дБм, защищаясь от log(0)
-    data["result"] = 10 * np.log10(power + 1e-12) + RSSI_OFFSET_DBM
+    # Окно Ханна
+    win = np.hanning(len(iq))
+    sig = (iq[:, 0] + 1j * iq[:, 1]) * win
+    fft = np.fft.fft(sig)
+    pwr = np.abs(fft) ** 2
+    p_dbm = 10 * np.log10(pwr + 1e-12) + RSSI_OFFSET_DBM
+    data["result"] = _top3_mean(p_dbm)
     data["event"].set()
     return 0
 

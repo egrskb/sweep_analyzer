@@ -164,6 +164,8 @@ def process_sweep(sweep: np.ndarray) -> None:
                     continue
                 if std_row[start_idx:end_idx].mean() > 2:
                     continue
+                if abs(mean_curr - mean_base) < THRESHOLD_DB:
+                    continue
                 key_start = START_MHZ + step_idx * STEP_MHZ + start_idx * BIN_WIDTH_MHZ
                 key_end = START_MHZ + step_idx * STEP_MHZ + end_idx * BIN_WIDTH_MHZ
                 key = (key_start, key_end)
@@ -176,15 +178,13 @@ def process_sweep(sweep: np.ndarray) -> None:
                         "master": mean_curr,
                         "slaves": slave_vals,
                         "timestamp": ts,
+                        "idx": (step_idx, start_idx, end_idx),
                     }
                 else:
                     TRACKED[key]["master"] = mean_curr
                     TRACKED[key]["slaves"] = slave_vals
                     TRACKED[key]["timestamp"] = ts
-
-                if abs(mean_curr - TRACKED[key]["baseline"]) < THRESHOLD_DB:
-                    del TRACKED[key]
-                    continue
+                    TRACKED[key]["idx"] = (step_idx, start_idx, end_idx)
 
                 slave_str = "".join(
                     f" | SDR slave {i+1}: {val:.1f} dBm" for i, val in enumerate(slave_vals)
@@ -194,6 +194,14 @@ def process_sweep(sweep: np.ndarray) -> None:
                     f"средний RSSI master: {mean_curr:.1f} dBm{slave_str}"
                 )
                 alerts = True
+
+    # Удаляем диапазоны, если уровень приблизился к baseline
+    for key, info in list(TRACKED.items()):
+        step_idx, start_idx, end_idx = info["idx"]
+        seg = sweep[step_idx, start_idx:end_idx]
+        mean_curr = _top3_mean(seg)
+        if abs(mean_curr - info["baseline"]) < THRESHOLD_DB:
+            del TRACKED[key]
 
     print(f"[i] Время свипа: {cycle:.2f} с")
     if not alerts:
