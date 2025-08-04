@@ -1,6 +1,6 @@
 # HackRF Sweep Analyzer
 
-A minimal Python package that wraps a subset of the HackRF sweep API via [CFFI](https://cffi.readthedocs.io) and performs FFT processing with [FFTW](http://www.fftw.org/).  The package exposes a single function, `start_sweep`, which streams power readings from a HackRF and delivers each completed sweep to a user‑supplied callback.
+A minimal Python package for the Panorama project that wraps a subset of the HackRF sweep API via [CFFI](https://cffi.readthedocs.io) and performs FFT processing with [FFTW](http://www.fftw.org/).  The package exposes a single function, `start_sweep`, which streams power readings from a HackRF and delivers each completed sweep to a user‑supplied callback.
 
 ## Features
 
@@ -29,7 +29,7 @@ sudo apt install libhackrf-dev libusb-1.0-0-dev libfftw3f-dev
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install numpy cffi
+pip install numpy cffi setuptools
 ```
 
 ## Building the extension
@@ -78,22 +78,29 @@ start_sweep(handle_sweep)
 
 ## Example scanner
 
-The repository includes `example.py` which records a baseline sweep, detects
-bins rising more than 10 dB above it, and (if extra HackRFs are connected)
-reports their RSSI at the same frequencies:
+The repository includes `drone_detection.py` which records a baseline sweep,
+looks for ranges of three or more bins changing by ±10 dB and prints their
+average RSSI. If extra HackRFs are connected their measurements are shown too:
 
 ```bash
-python example.py
+python drone_detection.py
 ```
 
-The script lists connected HackRF devices, chooses the first as master, and prints lines such as:
+To perform all steps automatically, including dependency installation and
+building the CFFI module, run the helper script:
+
+```bash
+./run_scanner.sh
+```
+
+The script lists connected HackRF devices, chooses the first as master, and
+prints ranges like:
 
 ```
-Пик на частоте 100.00 МГц: 42.3 дБ
+[+] Диапазон: 3200 - 3300 МГц | средний RSSI master: -35.5 dBm
 ```
 
-indicating the frequency and power of peaks relative to the baseline.  If
-slaves are present, their RSSI readings are appended.  Interrupt with
+If no anomalies are found, it prints `нет подозрительных активностей`. Press
 `Ctrl+C` to stop.
 
 ## Development notes
