@@ -6,8 +6,9 @@ from pathlib import Path
 from typing import Any, Dict
 
 DEFAULT_CONFIG = {
-    "freq_start": 88e6,
-    "freq_stop": 108e6,
+    "freq_start": 50e6,
+    "freq_stop": 6e9,
+    "freq_step": 5e6,
     "bin_size": 1e3,
     "sample_rate": 2e6,
     "gain": 20,
@@ -28,6 +29,12 @@ def load_config() -> Dict[str, Any]:
     if CONFIG_FILE.exists():
         try:
             loaded = json.loads(CONFIG_FILE.read_text())
+            if "freq_start_mhz" in loaded:
+                loaded["freq_start"] = loaded["freq_start_mhz"] * 1e6
+            if "freq_stop_mhz" in loaded:
+                loaded["freq_stop"] = loaded["freq_stop_mhz"] * 1e6
+            if "step_mhz" in loaded:
+                loaded["freq_step"] = loaded["step_mhz"] * 1e6
             cfg.update(loaded)
         except json.JSONDecodeError:
             pass
@@ -36,4 +43,8 @@ def load_config() -> Dict[str, Any]:
 
 def save_config(cfg: Dict[str, Any]) -> None:
     """Сохранить конфигурацию в JSON-файл."""
-    CONFIG_FILE.write_text(json.dumps(cfg, indent=2, ensure_ascii=False))
+    out = cfg.copy()
+    out["freq_start_mhz"] = cfg["freq_start"] / 1e6
+    out["freq_stop_mhz"] = cfg["freq_stop"] / 1e6
+    out["step_mhz"] = cfg.get("freq_step", 0) / 1e6
+    CONFIG_FILE.write_text(json.dumps(out, indent=2, ensure_ascii=False))

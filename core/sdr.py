@@ -1,9 +1,7 @@
 """Абстракция SDR-устройства для HackRF One.
 
-Модуль предоставляет простой класс :class:`SDRDevice`, который использует
-библиотеку :mod:`hackrf_sweep` для выполнения спектральных свипов. Для
-разработки и тестов предусмотрен класс :class:`MockSDR`, генерирующий
-случайные спектры.
+Модуль предоставляет класс :class:`SDRDevice`, использующий библиотеку
+:mod:`hackrf_sweep` для выполнения спектральных свипов.
 """
 from __future__ import annotations
 
@@ -104,25 +102,4 @@ def enumerate_devices() -> List[SDRDevice]:
     finally:
         lib.hackrf_exit()
     return devices
-
-
-class MockSDR(SDRDevice):
-    """Мок-устройство SDR для тестов и разработки."""
-
-    def __init__(self, serial: str = "MOCK") -> None:
-        super().__init__(serial)
-
-    def sweep(
-        self,
-        callback: Callable[[np.ndarray], None],
-        *,
-        config_path: str = "config.json",
-        stop_event: Optional[Event] = None,
-    ) -> None:
-        stop_event = stop_event or Event()
-        bins = 512
-        while not stop_event.is_set():
-            power = np.abs(np.fft.rfft(np.random.randn(bins))).astype(np.float32)
-            callback(power)
-            stop_event.wait(1.0)
 

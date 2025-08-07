@@ -1,20 +1,21 @@
-from core.sdr import MockSDR, enumerate_devices
-from threading import Event
+import numpy as np
+
+from core import sdr
 
 
-def test_mock_sweep():
-    dev = MockSDR()
-    received = []
-    stop = Event()
+def test_sdrdevice_sweep(monkeypatch):
+    captured = []
 
-    def handler(p):
-        received.append(p)
-        stop.set()
+    def fake_start_sweep(cb, config_path=None, serial=None, stop_event=None):
+        cb(np.array([1.0, 2.0], dtype=np.float32))
 
-    dev.sweep(handler, stop_event=stop)
-    assert received and received[0].ndim == 1
+    monkeypatch.setattr(sdr, "start_sweep", fake_start_sweep)
+    dev = sdr.SDRDevice("SER")
+    dev.sweep(lambda p: captured.append(p))
+    assert captured and captured[0].tolist() == [1.0, 2.0]
 
 
 def test_enumerate_devices_returns_list():
-    devices = enumerate_devices()
+    devices = sdr.enumerate_devices()
     assert isinstance(devices, list)
+

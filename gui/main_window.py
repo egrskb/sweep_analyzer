@@ -12,7 +12,7 @@ import pyqtgraph as pg
 from pyqtgraph.exporters import ImageExporter
 from pathlib import Path
 
-from core.sdr import SDRDevice, MockSDR, enumerate_devices
+from core.sdr import SDRDevice, enumerate_devices
 from gui.widgets.fft_plot import FFTPlot
 from gui.widgets.waterfall_plot import WaterfallPlot
 from utils import config
@@ -41,7 +41,17 @@ class SweepWorker(QtCore.QThread):
             sweep_time = now - last_ts
             elapsed = now - start_ts
             last_ts = now
-            freqs = np.linspace(self.cfg["freq_start"], self.cfg["freq_stop"], power.size)
+            freqs = np.arange(
+                self.cfg["freq_start"],
+                self.cfg["freq_stop"],
+                self.cfg["freq_step"],
+            )
+            if freqs.size != power.size:
+                freqs = np.linspace(
+                    self.cfg["freq_start"],
+                    self.cfg["freq_stop"],
+                    power.size,
+                )
             self.updated.emit(freqs, power, sweep_time, elapsed)
 
         try:
@@ -53,8 +63,6 @@ class SweepWorker(QtCore.QThread):
         if self._stop_event:
             self._stop_event.set()
         self.wait(2000)
-        if not isinstance(self.device, MockSDR):
-            self.terminate()
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -90,9 +98,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.bin_spin.setRange(1, 1e6)
         self.bin_spin.setValue(self.cfg["bin_size"])
         self.bin_spin.valueChanged.connect(lambda v: self._update_cfg("bin_size", v))
+        self.step_spin = QtWidgets.QDoubleSpinBox()
+        self.step_spin.setRange(1e3, 1e9)
+        self.step_spin.setValue(self.cfg["freq_step"])
+        self.step_spin.valueChanged.connect(lambda v: self._update_cfg("freq_step", v))
         form.addRow("Старт, Гц", self.start_spin)
         form.addRow("Стоп, Гц", self.stop_spin)
         form.addRow("Bin, Гц", self.bin_spin)
+        form.addRow("Шаг, Гц", self.step_spin)
         self.settings_dock.setWidget(w)
         self.addDockWidget(QtCore.Qt.RightDockWidgetArea, self.settings_dock)
 
@@ -146,7 +159,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._device_menu.clear()
         self.device_group = QtWidgets.QActionGroup(self)
         self.device_group.setExclusive(True)
-        devices = enumerate_devices() or [MockSDR()]  # fallback for development
+        devices = enumerate_devices()
+        if not devices:
+            QtWidgets.QMessageBox.warning(self, "Устройства", "HackRF не найден")
+            return
         for dev in devices:
             action = QtWidgets.QAction(dev.serial, self, checkable=True)
             action.triggered.connect(lambda checked, d=dev: self.set_device(d))

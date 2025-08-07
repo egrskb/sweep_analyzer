@@ -38,6 +38,7 @@ class FFTProcessor:
             Кортеж (частоты, мощности_дБ).
         """
         self.fft_size = len(iq)
+        iq = iq - np.mean(iq)
         window = np.hanning(self.fft_size)
         spectrum = np.fft.fftshift(np.fft.fft(iq * window))
         power = 20 * np.log10(np.abs(spectrum) + 1e-12)
