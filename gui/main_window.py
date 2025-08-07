@@ -44,7 +44,7 @@ class SweepWorker(QtCore.QThread):
             freqs = np.arange(
                 self.cfg["freq_start"],
                 self.cfg["freq_stop"],
-                self.cfg["freq_step"],
+                self.cfg["bin_size"],
             )
             if freqs.size != power.size:
                 freqs = np.linspace(
@@ -79,7 +79,10 @@ class MainWindow(QtWidgets.QMainWindow):
         layout = QtWidgets.QVBoxLayout(center)
         layout.addWidget(self.fft_plot)
         layout.addWidget(self.waterfall)
+        self.waterfall.plot.setXLink(self.fft_plot.plot)
         self.setCentralWidget(center)
+        self.fft_plot.set_levels(self.cfg["level_min"], self.cfg["level_max"])
+        self.waterfall.set_levels(self.cfg["level_min"], self.cfg["level_max"])
 
         # настройки диапазона
         self.settings_dock = QtWidgets.QDockWidget("Диапазон", self)
@@ -102,10 +105,20 @@ class MainWindow(QtWidgets.QMainWindow):
         self.step_spin.setRange(1e3, 1e9)
         self.step_spin.setValue(self.cfg["freq_step"])
         self.step_spin.valueChanged.connect(lambda v: self._update_cfg("freq_step", v))
+        self.level_min = QtWidgets.QDoubleSpinBox()
+        self.level_min.setRange(-200, 0)
+        self.level_min.setValue(self.cfg["level_min"])
+        self.level_min.valueChanged.connect(lambda v: self._update_cfg("level_min", v))
+        self.level_max = QtWidgets.QDoubleSpinBox()
+        self.level_max.setRange(-200, 0)
+        self.level_max.setValue(self.cfg["level_max"])
+        self.level_max.valueChanged.connect(lambda v: self._update_cfg("level_max", v))
         form.addRow("Старт, Гц", self.start_spin)
         form.addRow("Стоп, Гц", self.stop_spin)
         form.addRow("Bin, Гц", self.bin_spin)
         form.addRow("Шаг, Гц", self.step_spin)
+        form.addRow("Ур. мин, дБ", self.level_min)
+        form.addRow("Ур. макс, дБ", self.level_max)
         self.settings_dock.setWidget(w)
         self.addDockWidget(QtCore.Qt.RightDockWidgetArea, self.settings_dock)
 
@@ -116,6 +129,9 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         self.stop_action = self.toolbar.addAction(
             style.standardIcon(QtWidgets.QStyle.SP_MediaStop), "Стоп", self.stop
+        )
+        self.reset_action = self.toolbar.addAction(
+            style.standardIcon(QtWidgets.QStyle.SP_BrowserReload), "Сброс", self.reset_view
         )
         self.stop_action.setEnabled(False)
         start_btn = self.toolbar.widgetForAction(self.start_action)
@@ -153,7 +169,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         help_menu = menubar.addMenu("Справка")
         help_menu.addAction("О программе", self.show_about)
-        help_menu.addAction("Руководство", self.show_guide)
+        help_menu.addAction("Документация", self.show_docs)
 
     def refresh_devices(self) -> None:
         self._device_menu.clear()
@@ -199,8 +215,10 @@ class MainWindow(QtWidgets.QMainWindow):
     def update_plots(
         self, freqs: np.ndarray, power: np.ndarray, sweep_time: float, elapsed: float
     ) -> None:
+        self.fft_plot.set_levels(self.cfg["level_min"], self.cfg["level_max"])
         filtered = self.fft_plot.update_spectrum(freqs, power)
-        self.waterfall.update_spectrum(filtered)
+        self.waterfall.set_levels(self.cfg["level_min"], self.cfg["level_max"])
+        self.waterfall.update_spectrum(freqs, filtered)
         self.status.showMessage(
             f"Свип: {sweep_time:.2f} с | Время работы: {elapsed:.1f} с"
         )
@@ -208,6 +226,9 @@ class MainWindow(QtWidgets.QMainWindow):
     def _update_cfg(self, key: str, value: float) -> None:
         self.cfg[key] = value
         config.save_config(self.cfg)
+        if key in {"level_min", "level_max"}:
+            self.fft_plot.set_levels(self.cfg["level_min"], self.cfg["level_max"])
+            self.waterfall.set_levels(self.cfg["level_min"], self.cfg["level_max"])
 
     def export_spectrum(self) -> None:
         path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Экспорт спектра", filter="Файлы PNG (*.png)")
@@ -218,7 +239,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def export_waterfall(self) -> None:
         path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Экспорт водопада", filter="Файлы PNG (*.png)")
         if path:
-            exporter = ImageExporter(self.waterfall.view.scene())
+            exporter = ImageExporter(self.waterfall.plot.plotItem)
             exporter.export(path)
 
     def set_colormap(self, name: str) -> None:
@@ -239,23 +260,29 @@ class MainWindow(QtWidgets.QMainWindow):
             "<b>Анализатор спектра</b><br>Версия 0.1<br>Прототип анализатора спектра.",
         )
 
-    def show_guide(self) -> None:
+    def show_docs(self) -> None:
         doc_path = Path(__file__).resolve().parent.parent / "docs/_build/html/index.html"
         if doc_path.exists():
             dlg = QtWidgets.QDialog(self)
-            dlg.setWindowTitle("Руководство")
+            dlg.setWindowTitle("Документация")
             layout = QtWidgets.QVBoxLayout(dlg)
             browser = QtWidgets.QTextBrowser()
             browser.setSource(QtCore.QUrl.fromLocalFile(str(doc_path)))
+            browser.setStyleSheet("background:white;color:black;")
             layout.addWidget(browser)
             dlg.resize(800, 600)
             dlg.exec_()
         else:
             QtWidgets.QMessageBox.information(
                 self,
-                "Руководство",
+                "Документация",
                 "Документация не найдена. Сгенерируйте её с помощью Sphinx.",
             )
+
+    def reset_view(self) -> None:
+        """Сбросить масштаб графиков."""
+        self.fft_plot.reset_view()
+        self.waterfall.reset_view()
 
 
 def run() -> None:

@@ -6,14 +6,16 @@ from pathlib import Path
 from typing import Any, Dict
 
 DEFAULT_CONFIG = {
-    "freq_start": 50e6,
+    "freq_start": 5e9,
     "freq_stop": 6e9,
-    "freq_step": 1e6,
+    "freq_step": 5e6,
     "bin_size": 1e6,
     "sample_rate": 2e6,
     "gain": 20,
     "ppm": 0,
     "avg_window": 1,
+    "level_min": -120,
+    "level_max": 0,
 }
 
 CONFIG_FILE = Path("config.json")
@@ -47,4 +49,6 @@ def save_config(cfg: Dict[str, Any]) -> None:
     out["freq_start_mhz"] = cfg["freq_start"] / 1e6
     out["freq_stop_mhz"] = cfg["freq_stop"] / 1e6
     out["step_mhz"] = cfg.get("freq_step", 0) / 1e6
+    out["level_min"] = cfg.get("level_min", -120)
+    out["level_max"] = cfg.get("level_max", 0)
     CONFIG_FILE.write_text(json.dumps(out, indent=2, ensure_ascii=False))
