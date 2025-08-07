@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from typing import Optional
 
 from PyQt5 import QtCore, QtWidgets, QtGui
@@ -20,7 +21,7 @@ from utils import logging as dlogging
 class SweepWorker(QtCore.QThread):
     """Фоновый поток, выполняющий свип через ``hackrf_sweep``."""
 
-    updated = QtCore.pyqtSignal(np.ndarray, np.ndarray)
+    updated = QtCore.pyqtSignal(np.ndarray, np.ndarray, float, float)
 
     def __init__(self, device: SDRDevice, cfg: dict, parent: Optional[QtCore.QObject] = None) -> None:
         super().__init__(parent)
@@ -30,10 +31,17 @@ class SweepWorker(QtCore.QThread):
 
     def run(self) -> None:  # pragma: no cover - GUI thread
         self._running = True
+        start_ts = time.perf_counter()
+        last_ts = start_ts
 
         def handle(power: np.ndarray) -> None:
+            nonlocal last_ts
+            now = time.perf_counter()
+            sweep_time = now - last_ts
+            elapsed = now - start_ts
+            last_ts = now
             freqs = np.linspace(self.cfg["freq_start"], self.cfg["freq_stop"], power.size)
-            self.updated.emit(freqs, power)
+            self.updated.emit(freqs, power, sweep_time, elapsed)
 
         try:
             self.device.sweep(handle)
@@ -85,8 +93,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.addDockWidget(QtCore.Qt.RightDockWidgetArea, self.settings_dock)
 
         self.toolbar = self.addToolBar("Главная")
-        self.start_action = self.toolbar.addAction("Старт", self.start)
-        self.stop_action = self.toolbar.addAction("Стоп", self.stop)
+        style = self.style()
+        self.start_action = self.toolbar.addAction(
+            style.standardIcon(QtWidgets.QStyle.SP_MediaPlay), "Старт", self.start
+        )
+        self.stop_action = self.toolbar.addAction(
+            style.standardIcon(QtWidgets.QStyle.SP_MediaStop), "Стоп", self.stop
+        )
+        self.stop_action.setEnabled(False)
+
+        self.status = self.statusBar()
+        self.status.showMessage("Готов")
 
         self.device: SDRDevice | None = None
         self.worker: SweepWorker | None = None
@@ -139,8 +156,10 @@ class MainWindow(QtWidgets.QMainWindow):
             pass
 
     def start(self) -> None:
-        if not self.device:
+        if not self.device or self.worker:
             return
+        self.start_action.setEnabled(False)
+        self.stop_action.setEnabled(True)
         self.worker = SweepWorker(self.device, self.cfg)
         self.worker.updated.connect(self.update_plots)
         self.worker.start()
@@ -150,10 +169,18 @@ class MainWindow(QtWidgets.QMainWindow):
             self.worker.stop()
             self.worker.wait()
             self.worker = None
+        self.start_action.setEnabled(True)
+        self.stop_action.setEnabled(False)
+        self.status.showMessage("Остановлено")
 
-    def update_plots(self, freqs: np.ndarray, power: np.ndarray) -> None:
+    def update_plots(
+        self, freqs: np.ndarray, power: np.ndarray, sweep_time: float, elapsed: float
+    ) -> None:
         self.fft_plot.update_spectrum(freqs, power)
         self.waterfall.update_spectrum(power)
+        self.status.showMessage(
+            f"Свип: {sweep_time:.2f} с | Время работы: {elapsed:.1f} с"
+        )
 
     def _update_cfg(self, key: str, value: float) -> None:
         self.cfg[key] = value
@@ -204,16 +231,16 @@ class MainWindow(QtWidgets.QMainWindow):
 def run() -> None:
     app = QtWidgets.QApplication(sys.argv)
     app.setStyle("Fusion")
-    dark = QtGui.QPalette()
-    dark.setColor(QtGui.QPalette.Window, QtGui.QColor(53, 53, 53))
-    dark.setColor(QtGui.QPalette.WindowText, QtCore.Qt.white)
-    dark.setColor(QtGui.QPalette.Base, QtGui.QColor(35, 35, 35))
-    dark.setColor(QtGui.QPalette.AlternateBase, QtGui.QColor(53, 53, 53))
-    dark.setColor(QtGui.QPalette.Text, QtCore.Qt.white)
-    dark.setColor(QtGui.QPalette.Button, QtGui.QColor(53, 53, 53))
-    dark.setColor(QtGui.QPalette.ButtonText, QtCore.Qt.white)
-    app.setPalette(dark)
-    pg.setConfigOptions(background="#353535", foreground="w")
+    palette = QtGui.QPalette()
+    palette.setColor(QtGui.QPalette.Window, QtGui.QColor("#232629"))
+    palette.setColor(QtGui.QPalette.WindowText, QtCore.Qt.white)
+    palette.setColor(QtGui.QPalette.Base, QtGui.QColor("#1e1e1e"))
+    palette.setColor(QtGui.QPalette.AlternateBase, QtGui.QColor("#2b2b2b"))
+    palette.setColor(QtGui.QPalette.Text, QtCore.Qt.white)
+    palette.setColor(QtGui.QPalette.Button, QtGui.QColor("#2b2b2b"))
+    palette.setColor(QtGui.QPalette.ButtonText, QtCore.Qt.white)
+    app.setPalette(palette)
+    pg.setConfigOptions(background="#1e1e1e", foreground="w", antialias=True)
     win = MainWindow()
     win.show()
     sys.exit(app.exec_())

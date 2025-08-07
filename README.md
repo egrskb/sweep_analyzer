@@ -107,6 +107,17 @@ prints ranges like:
 If no anomalies are found, it prints `нет подозрительных активностей`. Press
 `Ctrl+C` to stop.
 
+## Запуск GUI
+
+Для запуска графического интерфейса используйте вспомогательный скрипт:
+
+```bash
+./run_dev.bash
+```
+
+Он создаст виртуальное окружение, установит зависимости, соберёт расширение
+`hackrf_sweep`, сгенерирует документацию Sphinx и запустит приложение.
+
 ## Development notes
 
 After modifying the C sources or configuration, re-run `python build_hackrf_sweep.py` to rebuild the extension.  `start_sweep` handles initialisation and cleanup of the device, but you must have a HackRF attached for the example to run successfully.

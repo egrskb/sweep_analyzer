@@ -16,5 +16,8 @@ pip install -e . cffi sphinx
 # build hackrf_sweep extension
 python build_hackrf_sweep.py
 
+# build documentation
+sphinx-build -b html docs docs/_build/html || true
+
 # launch application
 python -m gui.main_window
