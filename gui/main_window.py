@@ -74,7 +74,8 @@ class MainWindow(QtWidgets.QMainWindow):
         file_menu.addAction("Save CSV", self.save_csv)
 
         device_menu = menubar.addMenu("Master SDR")
-        self.device_group = QtWidgets.QActionGroup(self, exclusive=True)
+        self.device_group = QtWidgets.QActionGroup(self)
+        self.device_group.setExclusive(True)
         self._device_menu = device_menu
         self.refresh_devices()
 
@@ -89,7 +90,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def refresh_devices(self) -> None:
         self._device_menu.clear()
-        self.device_group = QtWidgets.QActionGroup(self, exclusive=True)
+        self.device_group = QtWidgets.QActionGroup(self)
+        self.device_group.setExclusive(True)
         devices = enumerate_devices() or [MockSDR()]  # fallback for development
         for dev in devices:
             action = QtWidgets.QAction(dev.serial, self, checkable=True)
