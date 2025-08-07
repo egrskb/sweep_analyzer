@@ -43,14 +43,18 @@ class SweepWorker(QtCore.QThread):
             freqs = np.linspace(self.cfg["freq_start"], self.cfg["freq_stop"], power.size)
             self.updated.emit(freqs, power, sweep_time, elapsed)
 
-        try:
-            self.device.sweep(handle)
-        except Exception:
-            pass
+        while self._running:
+            try:
+                self.device.sweep(handle)
+            except Exception:
+                break
+            if isinstance(self.device, MockSDR):
+                time.sleep(1)
 
     def stop(self) -> None:
         self._running = False
-        self.terminate()
+        if not isinstance(self.device, MockSDR):
+            self.terminate()
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -219,7 +223,14 @@ class MainWindow(QtWidgets.QMainWindow):
     def show_guide(self) -> None:
         doc_path = Path(__file__).resolve().parent.parent / "docs/_build/html/index.html"
         if doc_path.exists():
-            QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(str(doc_path)))
+            dlg = QtWidgets.QDialog(self)
+            dlg.setWindowTitle("Руководство")
+            layout = QtWidgets.QVBoxLayout(dlg)
+            browser = QtWidgets.QTextBrowser()
+            browser.setSource(QtCore.QUrl.fromLocalFile(str(doc_path)))
+            layout.addWidget(browser)
+            dlg.resize(800, 600)
+            dlg.exec_()
         else:
             QtWidgets.QMessageBox.information(
                 self,
