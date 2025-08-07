@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import numpy as np
+from threading import Event
 from typing import List
 
 try:  # pragma: no cover - module may be unavailable during tests
@@ -18,25 +19,60 @@ class SDRDevice:
 
     def __init__(self, serial: str) -> None:
         self.serial = serial
+        self._dev = ffi.NULL if ffi else None
 
     def open(self) -> None:
-        """Открыть соединение с устройством.
+        """Открыть соединение с устройством."""
 
-        Библиотека :mod:`hackrf_sweep` выполняет настройку устройства при
-        запуске сканирования, поэтому этот метод присутствует лишь для
-        совместимости API.
-        """
+        if lib is None:  # pragma: no cover - no hardware during tests
+            raise RuntimeError("hackrf_sweep не установлен")
+        if lib.hackrf_init() != 0:
+            raise RuntimeError("hackrf_init failed")
+        dev_pp = ffi.new("hackrf_device **")
+        if lib.hackrf_open_by_serial(self.serial.encode(), dev_pp) != 0:
+            lib.hackrf_exit()
+            raise RuntimeError("hackrf_open_by_serial failed")
+        self._dev = dev_pp[0]
 
     def close(self) -> None:
         """Закрыть соединение с устройством."""
 
-    def read_samples(self, num_samples: int) -> np.ndarray:  # pragma: no cover - hardware specific
-        """Считать IQ-сэмплы с устройства.
+        if lib is None or not self._dev:  # pragma: no cover
+            return
+        lib.hackrf_close(self._dev)
+        lib.hackrf_exit()
+        self._dev = ffi.NULL
 
-        Прямой доступ к сэмплам в данном каркасе не реализован; сканирование и
-        обработка FFT выполняются через :mod:`hackrf_sweep`.
-        """
-        raise NotImplementedError("Прямой доступ к сэмплам не реализован")
+    def read_samples(self, num_samples: int) -> np.ndarray:  # pragma: no cover - hardware specific
+        """Считать ``num_samples`` IQ-сэмплов с устройства."""
+
+        if lib is None or not self._dev:
+            raise RuntimeError("Устройство не открыто")
+
+        total = num_samples * 2
+        buf = ffi.new("uint8_t[]", total)
+        written = 0
+        ready = Event()
+
+        @ffi.callback("int(hackrf_transfer*)")
+        def _cb(transfer):
+            nonlocal written
+            n = min(transfer.valid_length, total - written)
+            ffi.memmove(buf + written, transfer.buffer, n)
+            written += n
+            if written >= total:
+                ready.set()
+            return 0
+
+        if lib.hackrf_start_rx(self._dev, _cb, ffi.NULL) != 0:
+            raise RuntimeError("hackrf_start_rx failed")
+        ready.wait()
+        lib.hackrf_stop_rx(self._dev)
+
+        arr = np.frombuffer(ffi.buffer(buf, total), dtype=np.uint8)
+        i = arr[0::2].astype(np.float32) - 128
+        q = arr[1::2].astype(np.float32) - 128
+        return (i + 1j * q).astype(np.complex64) / 128.0
 
 
 def enumerate_devices() -> List[SDRDevice]:

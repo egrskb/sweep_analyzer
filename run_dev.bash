@@ -11,7 +11,7 @@ source .venv/bin/activate
 
 # install Python dependencies
 pip install --upgrade pip setuptools wheel
-pip install -e . cffi
+pip install -e . cffi sphinx
 
 # build hackrf_sweep extension
 python build_hackrf_sweep.py

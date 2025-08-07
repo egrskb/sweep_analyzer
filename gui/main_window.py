@@ -4,7 +4,7 @@ from __future__ import annotations
 import sys
 from typing import Optional
 
-from PyQt5 import QtCore, QtWidgets
+from PyQt5 import QtCore, QtWidgets, QtGui
 import numpy as np
 import pyqtgraph as pg
 from pyqtgraph.exporters import ImageExporter
@@ -57,6 +57,29 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.addWidget(self.waterfall)
         self.setCentralWidget(center)
 
+        # настройки диапазона
+        self.settings_dock = QtWidgets.QDockWidget("Диапазон", self)
+        form = QtWidgets.QFormLayout()
+        w = QtWidgets.QWidget()
+        w.setLayout(form)
+        self.start_spin = QtWidgets.QDoubleSpinBox()
+        self.start_spin.setRange(0, 6e9)
+        self.start_spin.setValue(self.cfg["freq_start"])
+        self.start_spin.valueChanged.connect(lambda v: self._update_cfg("freq_start", v))
+        self.stop_spin = QtWidgets.QDoubleSpinBox()
+        self.stop_spin.setRange(0, 6e9)
+        self.stop_spin.setValue(self.cfg["freq_stop"])
+        self.stop_spin.valueChanged.connect(lambda v: self._update_cfg("freq_stop", v))
+        self.bin_spin = QtWidgets.QDoubleSpinBox()
+        self.bin_spin.setRange(1, 1e6)
+        self.bin_spin.setValue(self.cfg["bin_size"])
+        self.bin_spin.valueChanged.connect(lambda v: self._update_cfg("bin_size", v))
+        form.addRow("Старт, Гц", self.start_spin)
+        form.addRow("Стоп, Гц", self.stop_spin)
+        form.addRow("Bin, Гц", self.bin_spin)
+        self.settings_dock.setWidget(w)
+        self.addDockWidget(QtCore.Qt.RightDockWidgetArea, self.settings_dock)
+
         self.toolbar = self.addToolBar("Главная")
         self.start_action = self.toolbar.addAction("Старт", self.start)
         self.stop_action = self.toolbar.addAction("Стоп", self.stop)
@@ -82,7 +105,7 @@ class MainWindow(QtWidgets.QMainWindow):
         view_menu = menubar.addMenu("Вид")
         cmap_menu = view_menu.addMenu("Цветовая карта")
         for name in ["viridis", "plasma", "inferno", "magma"]:
-            action = cmap_menu.addAction(name, lambda _, n=name: self.set_colormap(n))
+            cmap_menu.addAction(name, lambda checked=False, n=name: self.set_colormap(n))
 
         help_menu = menubar.addMenu("Справка")
         help_menu.addAction("О программе", self.show_about)
@@ -129,6 +152,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.fft_plot.update_spectrum(freqs, power)
         self.waterfall.update_spectrum(power)
 
+    def _update_cfg(self, key: str, value: float) -> None:
+        self.cfg[key] = value
+        config.save_config(self.cfg)
+
     def export_spectrum(self) -> None:
         path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Экспорт спектра", filter="Файлы PNG (*.png)")
         if path:
@@ -156,19 +183,34 @@ class MainWindow(QtWidgets.QMainWindow):
         QtWidgets.QMessageBox.about(
             self,
             "О программе",
-            "<b>Анализатор спектра</b><br>Версия 0.1<br><a href='https://github.com'>Репозиторий</a><br>Демонстрация модульной архитектуры.",
+            "<b>Анализатор спектра</b><br>Версия 0.1<br>Прототип анализатора спектра.",
         )
 
     def show_guide(self) -> None:
-        QtWidgets.QMessageBox.information(
-            self,
-            "Руководство",
-            "Используйте Старт/Стоп для управления съёмом. Выберите главный SDR в меню. Экспорт изображений доступен в меню Файл.",
-        )
+        doc_path = Path(__file__).resolve().parent.parent / "docs/_build/html/index.html"
+        if doc_path.exists():
+            QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(str(doc_path)))
+        else:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Руководство",
+                "Документация не найдена. Сгенерируйте её с помощью Sphinx.",
+            )
 
 
 def run() -> None:
     app = QtWidgets.QApplication(sys.argv)
+    app.setStyle("Fusion")
+    dark = QtGui.QPalette()
+    dark.setColor(QtGui.QPalette.Window, QtGui.QColor(53, 53, 53))
+    dark.setColor(QtGui.QPalette.WindowText, QtCore.Qt.white)
+    dark.setColor(QtGui.QPalette.Base, QtGui.QColor(35, 35, 35))
+    dark.setColor(QtGui.QPalette.AlternateBase, QtGui.QColor(53, 53, 53))
+    dark.setColor(QtGui.QPalette.Text, QtCore.Qt.white)
+    dark.setColor(QtGui.QPalette.Button, QtGui.QColor(53, 53, 53))
+    dark.setColor(QtGui.QPalette.ButtonText, QtCore.Qt.white)
+    app.setPalette(dark)
+    pg.setConfigOptions(background="#353535", foreground="w")
     win = MainWindow()
     win.show()
     sys.exit(app.exec_())
