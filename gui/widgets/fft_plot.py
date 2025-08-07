@@ -15,17 +15,19 @@ class FFTPlot(QtWidgets.QWidget):
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
         layout = QtWidgets.QVBoxLayout(self)
+        info = QtWidgets.QHBoxLayout()
+        self.freq_label = QtWidgets.QLabel("Частота: -")
+        self.power_label = QtWidgets.QLabel("Мощность: -")
+        info.addWidget(self.freq_label)
+        info.addStretch()
+        info.addWidget(self.power_label)
+        layout.addLayout(info)
+
         self.plot = pg.PlotWidget()
         layout.addWidget(self.plot)
         self.curve = self.plot.plot(pen=pg.mkPen("y"))
         self.peak_curve = self.plot.plot(pen=pg.mkPen("r", width=2))
         self.baseline_curve = self.plot.plot(pen=pg.mkPen("g"))
-        self.v_line = pg.InfiniteLine(angle=90, movable=False, pen=pg.mkPen("#aaa"))
-        self.h_line = pg.InfiniteLine(angle=0, movable=False, pen=pg.mkPen("#aaa"))
-        self.plot.addItem(self.v_line, ignoreBounds=True)
-        self.plot.addItem(self.h_line, ignoreBounds=True)
-        self.label = pg.TextItem(color="w")
-        self.plot.addItem(self.label)
         self.plot.scene().sigMouseMoved.connect(self._mouse_moved)
         self.plot.setLabel("left", "Мощность", units="дБ")
         self.plot.setLabel("bottom", "Частота", units="Гц")
@@ -68,10 +70,8 @@ class FFTPlot(QtWidgets.QWidget):
         mouse_point = self.plot.plotItem.vb.mapSceneToView(pos)
         x = mouse_point.x()
         y = mouse_point.y()
-        self.v_line.setPos(x)
-        self.h_line.setPos(y)
-        self.label.setText(f"{x/1e6:.2f} МГц\n{y:.1f} дБм")
-        self.label.setPos(x, y)
+        self.freq_label.setText(f"Частота: {x/1e6:.2f} МГц")
+        self.power_label.setText(f"Мощность: {y:.1f} дБм")
 
     def set_levels(self, vmin: float, vmax: float) -> None:
         """Установить диапазон уровней по оси Y."""
@@ -85,3 +85,5 @@ class FFTPlot(QtWidgets.QWidget):
         self.baseline_curve.clear()
         self._avg_buffer.clear()
         self._baseline = None
+        self.freq_label.setText("Частота: -")
+        self.power_label.setText("Мощность: -")

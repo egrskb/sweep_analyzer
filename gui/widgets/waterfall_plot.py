@@ -18,6 +18,8 @@ class WaterfallPlot(QtWidgets.QWidget):
         self.plot.setLabel("bottom", "Частота", units="Гц")
         self.plot.invertY(True)
         self.img = pg.ImageItem()
+        cmap = pg.colormap.get("inferno")
+        self.img.setLookupTable(cmap.getLookupTable())
         self.plot.addItem(self.img)
         layout.addWidget(self.plot)
         self.data = np.zeros((self.size, 1024))
