@@ -14,7 +14,10 @@ class WaterfallPlot(QtWidgets.QWidget):
         self.size = size
         self.img = pg.ImageItem()
         self.view = pg.GraphicsLayoutWidget()
-        self.view.addItem(self.img)
+        self.vb = self.view.addViewBox()
+        self.vb.setMenuEnabled(False)
+        self.vb.setAspectLocked(False)
+        self.vb.addItem(self.img)
         layout = QtWidgets.QVBoxLayout(self)
         layout.addWidget(self.view)
         self.data = np.zeros((self.size, 1024))
