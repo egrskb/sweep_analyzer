@@ -1,59 +1,55 @@
-"""SDR device abstraction layer."""
+"""SDR device abstraction layer using ``hackrf_sweep``."""
 from __future__ import annotations
 
 import numpy as np
-from typing import List, Optional
+from typing import List
 
-try:
-    import SoapySDR  # type: ignore
+try:  # pragma: no cover - module may be unavailable during tests
+    from hackrf_sweep import _lib  # type: ignore
 except Exception:  # pragma: no cover
-    SoapySDR = None  # type: ignore
+    _lib = None  # type: ignore
+
+ffi = _lib.ffi if _lib else None
+lib = _lib.lib if _lib else None
 
 
 class SDRDevice:
-    """Represents a single SDR device using SoapySDR."""
+    """Represents a single HackRF One device."""
 
     def __init__(self, serial: str) -> None:
         self.serial = serial
-        self._device: Optional[object] = None
 
     def open(self) -> None:
-        """Open the device connection."""
-        if SoapySDR is None:  # pragma: no cover
-            raise RuntimeError("SoapySDR not available")
-        args = dict(serial=self.serial)
-        self._device = SoapySDR.Device(args)
+        """Open the device connection.
+
+        The :mod:`hackrf_sweep` library handles device setup internally when
+        starting a sweep, so this method is a no-op provided for API
+        compatibility.
+        """
 
     def close(self) -> None:
         """Close the device connection."""
-        self._device = None
 
-    def read_samples(self, num_samples: int) -> np.ndarray:
+    def read_samples(self, num_samples: int) -> np.ndarray:  # pragma: no cover - hardware specific
         """Read IQ samples from the device.
 
-        Args:
-            num_samples: Number of complex samples to retrieve.
-
-        Returns:
-            Array of complex64 IQ samples.
+        Direct sample access is not implemented in this skeleton; sweeping and
+        FFT processing are performed via :mod:`hackrf_sweep`.
         """
-        if self._device is None:  # pragma: no cover
-            raise RuntimeError("Device not open")
-        buf = np.empty(num_samples, dtype=np.complex64)
-        # Here we simply read from channel 0; real implementation would
-        # configure streams etc.
-        self._device.readStream(self._device.setupStream(SoapySDR.SOAPY_SDR_RX, SoapySDR.SOAPY_SDR_CF32), [buf], num_samples)
-        return buf
+        raise NotImplementedError("Direct sample access not implemented")
 
 
 def enumerate_devices() -> List[SDRDevice]:
-    """Return list of available SDR devices."""
+    """Return list of available HackRF devices."""
+
     devices: List[SDRDevice] = []
-    if SoapySDR is None:
+    if lib is None:  # pragma: no cover - exercised when extension missing
         return devices
-    for info in SoapySDR.Device.enumerate():
-        serial = info.get("serial", "unknown")
+    dev_list = lib.hackrf_device_list()
+    for i in range(dev_list.devicecount):
+        serial = ffi.string(dev_list.serial_numbers[i]).decode()
         devices.append(SDRDevice(serial))
+    lib.hackrf_device_list_free(dev_list)
     return devices
 
 
@@ -62,10 +58,10 @@ class MockSDR(SDRDevice):
 
     def __init__(self, serial: str = "MOCK") -> None:
         super().__init__(serial)
-        self._device = True
 
     def read_samples(self, num_samples: int) -> np.ndarray:  # pragma: no cover - deterministic
         t = np.arange(num_samples)
         signal = np.exp(2j * np.pi * 0.1 * t)
         noise = (np.random.randn(num_samples) + 1j * np.random.randn(num_samples)) * 0.01
         return (signal + noise).astype(np.complex64)
+
