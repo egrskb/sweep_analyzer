@@ -40,16 +40,28 @@ class SDRDevice:
 
 
 def enumerate_devices() -> List[SDRDevice]:
-    """Return list of available HackRF devices."""
+    """Return list of available HackRF devices.
+
+    The underlying ``libhackrf`` library requires :func:`hackrf_init` to be
+    called before any device operations. Failing to do so may lead to a
+    segmentation fault on some systems. We therefore initialise the library
+    temporarily while collecting the device list and shut it down afterwards.
+    """
 
     devices: List[SDRDevice] = []
     if lib is None:  # pragma: no cover - exercised when extension missing
         return devices
-    dev_list = lib.hackrf_device_list()
-    for i in range(dev_list.devicecount):
-        serial = ffi.string(dev_list.serial_numbers[i]).decode()
-        devices.append(SDRDevice(serial))
-    lib.hackrf_device_list_free(dev_list)
+
+    if lib.hackrf_init() != 0:  # pragma: no cover - library initialisation
+        return devices
+    try:
+        dev_list = lib.hackrf_device_list()
+        for i in range(dev_list.devicecount):
+            serial = ffi.string(dev_list.serial_numbers[i]).decode()
+            devices.append(SDRDevice(serial))
+        lib.hackrf_device_list_free(dev_list)
+    finally:
+        lib.hackrf_exit()
     return devices
 
 
