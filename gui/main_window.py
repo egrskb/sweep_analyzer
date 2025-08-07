@@ -199,8 +199,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def update_plots(
         self, freqs: np.ndarray, power: np.ndarray, sweep_time: float, elapsed: float
     ) -> None:
-        self.fft_plot.update_spectrum(freqs, power)
-        self.waterfall.update_spectrum(power)
+        filtered = self.fft_plot.update_spectrum(freqs, power)
+        self.waterfall.update_spectrum(filtered)
         self.status.showMessage(
             f"Свип: {sweep_time:.2f} с | Время работы: {elapsed:.1f} с"
         )

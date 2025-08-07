@@ -17,6 +17,7 @@ class WaterfallPlot(QtWidgets.QWidget):
         self.vb = self.view.addViewBox()
         self.vb.setMenuEnabled(False)
         self.vb.setAspectLocked(False)
+        self.vb.invertY(True)
         self.vb.addItem(self.img)
         layout = QtWidgets.QVBoxLayout(self)
         layout.addWidget(self.view)
@@ -28,4 +29,4 @@ class WaterfallPlot(QtWidgets.QWidget):
         if power.size != self.data.shape[1]:
             self.data = np.zeros((self.size, power.size))
         self.data[-1, :] = power
-        self.img.setImage(self.data, autoLevels=False)
+        self.img.setImage(self.data, autoLevels=True)
