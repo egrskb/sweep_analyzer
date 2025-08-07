@@ -1,4 +1,4 @@
-"""Main application window."""
+"""Главное окно приложения."""
 from __future__ import annotations
 
 import sys
@@ -19,7 +19,7 @@ from utils import logging as dlogging
 
 
 class SweepWorker(QtCore.QThread):
-    """Background thread performing sweep measurements."""
+    """Фоновый поток, выполняющий циклический съём спектра."""
 
     updated = QtCore.pyqtSignal(np.ndarray, np.ndarray)
 
@@ -42,11 +42,11 @@ class SweepWorker(QtCore.QThread):
 
 
 class MainWindow(QtWidgets.QMainWindow):
-    """Main GUI for the spectrum analyzer."""
+    """Основной графический интерфейс анализатора спектра."""
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("Sweep Analyzer")
+        self.setWindowTitle("Анализатор спектра")
         self.cfg = config.load_config()
 
         self.fft_plot = FFTPlot()
@@ -57,9 +57,9 @@ class MainWindow(QtWidgets.QMainWindow):
         layout.addWidget(self.waterfall)
         self.setCentralWidget(center)
 
-        self.toolbar = self.addToolBar("Main")
-        self.start_action = self.toolbar.addAction("Start", self.start)
-        self.stop_action = self.toolbar.addAction("Stop", self.stop)
+        self.toolbar = self.addToolBar("Главная")
+        self.start_action = self.toolbar.addAction("Старт", self.start)
+        self.stop_action = self.toolbar.addAction("Стоп", self.stop)
 
         self.device: SDRDevice | None = None
         self.worker: SweepWorker | None = None
@@ -68,25 +68,25 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _build_menu(self) -> None:
         menubar = self.menuBar()
-        file_menu = menubar.addMenu("File")
-        file_menu.addAction("Export Spectrum", self.export_spectrum)
-        file_menu.addAction("Export Waterfall", self.export_waterfall)
-        file_menu.addAction("Save CSV", self.save_csv)
+        file_menu = menubar.addMenu("Файл")
+        file_menu.addAction("Экспорт спектра", self.export_spectrum)
+        file_menu.addAction("Экспорт водопада", self.export_waterfall)
+        file_menu.addAction("Сохранить CSV", self.save_csv)
 
-        device_menu = menubar.addMenu("Master SDR")
+        device_menu = menubar.addMenu("Главный SDR")
         self.device_group = QtWidgets.QActionGroup(self)
         self.device_group.setExclusive(True)
         self._device_menu = device_menu
         self.refresh_devices()
 
-        view_menu = menubar.addMenu("View")
-        cmap_menu = view_menu.addMenu("Color Map")
+        view_menu = menubar.addMenu("Вид")
+        cmap_menu = view_menu.addMenu("Цветовая карта")
         for name in ["viridis", "plasma", "inferno", "magma"]:
             action = cmap_menu.addAction(name, lambda _, n=name: self.set_colormap(n))
 
-        help_menu = menubar.addMenu("Help")
-        help_menu.addAction("About", self.show_about)
-        help_menu.addAction("Guide", self.show_guide)
+        help_menu = menubar.addMenu("Справка")
+        help_menu.addAction("О программе", self.show_about)
+        help_menu.addAction("Руководство", self.show_guide)
 
     def refresh_devices(self) -> None:
         self._device_menu.clear()
@@ -130,13 +130,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.waterfall.update_spectrum(power)
 
     def export_spectrum(self) -> None:
-        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Export Spectrum", filter="PNG Files (*.png)")
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Экспорт спектра", filter="Файлы PNG (*.png)")
         if path:
             exporter = ImageExporter(self.fft_plot.plot.plotItem)
             exporter.export(path)
 
     def export_waterfall(self) -> None:
-        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Export Waterfall", filter="PNG Files (*.png)")
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Экспорт водопада", filter="Файлы PNG (*.png)")
         if path:
             exporter = ImageExporter(self.waterfall.view.scene())
             exporter.export(path)
@@ -146,7 +146,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.waterfall.img.setLookupTable(cmap.getLookupTable())
 
     def save_csv(self) -> None:
-        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Save CSV", filter="CSV Files (*.csv)")
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Сохранить CSV", filter="Файлы CSV (*.csv)")
         if path and getattr(self.fft_plot.curve, 'xData', None) is not None:
             freqs = self.fft_plot.curve.xData
             power = self.fft_plot.curve.yData
@@ -155,15 +155,15 @@ class MainWindow(QtWidgets.QMainWindow):
     def show_about(self) -> None:
         QtWidgets.QMessageBox.about(
             self,
-            "About Sweep Analyzer",
-            "<b>Sweep Analyzer</b><br>Version 0.1<br><a href='https://github.com'>Repository</a><br>Modular architecture demo.",
+            "О программе",
+            "<b>Анализатор спектра</b><br>Версия 0.1<br><a href='https://github.com'>Репозиторий</a><br>Демонстрация модульной архитектуры.",
         )
 
     def show_guide(self) -> None:
         QtWidgets.QMessageBox.information(
             self,
-            "Guide",
-            "Use Start/Stop to control sweep. Choose Master SDR from menu. Export images from File menu.",
+            "Руководство",
+            "Используйте Старт/Стоп для управления съёмом. Выберите главный SDR в меню. Экспорт изображений доступен в меню Файл.",
         )
 
 

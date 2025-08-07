@@ -1,4 +1,4 @@
-"""FFT processing utilities for spectrum analyzer."""
+"""Утилиты FFT для анализатора спектра."""
 from __future__ import annotations
 
 import numpy as np
@@ -7,16 +7,17 @@ from typing import Deque, Optional, Tuple
 
 
 class FFTProcessor:
-    """Compute FFT and apply spectral filters.
+    """Вычисление FFT и применение спектральных фильтров.
 
-    This class keeps internal state for averaging, min/max hold and
-    persistence filters.  The public :meth:`process` method accepts IQ samples
-    and returns frequency bins and power values in dB.
+    Класс хранит внутреннее состояние для усреднения, режимов
+    минимального/максимального удержания и персистентности.
+    Публичный метод :meth:`process` принимает IQ-сэмплы и
+    возвращает частотные бинны и значения мощности в дБ.
 
-    Attributes:
-        sample_rate: Sampling rate of the incoming IQ stream in Hz.
-        fft_size: Number of points in FFT; determined from input length.
-        avg_window: Number of frames used for running average.
+    Атрибуты:
+        sample_rate: частота дискретизации входного потока IQ в Гц.
+        fft_size: количество точек FFT, определяется по длине входа.
+        avg_window: размер окна для скользящего усреднения.
     """
 
     def __init__(self, sample_rate: float, avg_window: int = 1) -> None:
@@ -28,13 +29,13 @@ class FFTProcessor:
         self._persistence: Optional[np.ndarray] = None
 
     def process(self, iq: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """Calculate FFT and return frequencies and magnitudes in dB.
+        """Вычислить FFT и вернуть частоты и мощности в дБ.
 
         Args:
-            iq: Complex64 numpy array of IQ samples.
+            iq: массив numpy complex64 с IQ-сэмплами.
 
         Returns:
-            Tuple of (frequencies, powers_db).
+            Кортеж (частоты, мощности_дБ).
         """
         self.fft_size = len(iq)
         window = np.hanning(self.fft_size)
@@ -59,9 +60,9 @@ class FFTProcessor:
         return freqs, avg_power
 
     def current_min_max(self) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
-        """Return min and max hold arrays."""
+        """Вернуть массивы минимального и максимального удержания."""
         return self._min_hold, self._max_hold
 
     def current_persistence(self) -> Optional[np.ndarray]:
-        """Return persistence array."""
+        """Вернуть массив персистентности."""
         return self._persistence

@@ -1,4 +1,4 @@
-"""Simple JSON-based configuration helper."""
+"""Простой помощник по работе с конфигурацией в формате JSON."""
 from __future__ import annotations
 
 import json
@@ -19,12 +19,21 @@ CONFIG_FILE = Path("config.json")
 
 
 def load_config() -> Dict[str, Any]:
-    """Load configuration from JSON file."""
+    """Загрузить конфигурацию из JSON-файла.
+
+    Отсутствующие ключи дополняются значениями по умолчанию,
+    чтобы избежать ошибок доступа по ключу.
+    """
+    cfg = DEFAULT_CONFIG.copy()
     if CONFIG_FILE.exists():
-        return json.loads(CONFIG_FILE.read_text())
-    return DEFAULT_CONFIG.copy()
+        try:
+            loaded = json.loads(CONFIG_FILE.read_text())
+            cfg.update(loaded)
+        except json.JSONDecodeError:
+            pass
+    return cfg
 
 
 def save_config(cfg: Dict[str, Any]) -> None:
-    """Save configuration to JSON file."""
-    CONFIG_FILE.write_text(json.dumps(cfg, indent=2))
+    """Сохранить конфигурацию в JSON-файл."""
+    CONFIG_FILE.write_text(json.dumps(cfg, indent=2, ensure_ascii=False))

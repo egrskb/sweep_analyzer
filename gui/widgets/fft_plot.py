@@ -1,4 +1,4 @@
-"""Reusable FFT plot widget using pyqtgraph."""
+"""Многоразовый виджет графика FFT на основе pyqtgraph."""
 from __future__ import annotations
 
 import pyqtgraph as pg
@@ -7,7 +7,7 @@ import numpy as np
 
 
 class FFTPlot(QtWidgets.QWidget):
-    """Widget displaying a single spectrum trace."""
+    """Виджет, отображающий одиночный спектральный след."""
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
@@ -15,9 +15,9 @@ class FFTPlot(QtWidgets.QWidget):
         self.plot = pg.PlotWidget()
         layout.addWidget(self.plot)
         self.curve = self.plot.plot(pen=pg.mkPen("y"))
-        self.plot.setLabel("left", "Power", units="dB")
-        self.plot.setLabel("bottom", "Frequency", units="Hz")
+        self.plot.setLabel("left", "Мощность", units="дБ")
+        self.plot.setLabel("bottom", "Частота", units="Гц")
 
     def update_spectrum(self, freqs: np.ndarray, power: np.ndarray) -> None:
-        """Update plot with new data."""
+        """Обновить график новыми данными."""
         self.curve.setData(freqs, power)

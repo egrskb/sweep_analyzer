@@ -1,4 +1,4 @@
-"""Waterfall plot widget."""
+"""Виджет водопада спектра."""
 from __future__ import annotations
 
 import numpy as np
@@ -7,7 +7,7 @@ from PyQt5 import QtWidgets
 
 
 class WaterfallPlot(QtWidgets.QWidget):
-    """Display rolling spectra as a waterfall."""
+    """Отображает последовательные спектры в виде водопада."""
 
     def __init__(self, size: int = 200, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
@@ -23,7 +23,7 @@ class WaterfallPlot(QtWidgets.QWidget):
         self.data = np.zeros((self.size, 1024))
 
     def update_spectrum(self, power: np.ndarray) -> None:
-        """Roll image up and append new spectrum."""
+        """Сдвинуть изображение вверх и добавить новый спектр."""
         self.data = np.roll(self.data, -1, axis=0)
         if power.size != self.data.shape[1]:
             self.data = np.zeros((self.size, power.size))

@@ -1,4 +1,4 @@
-"""SDR device abstraction layer using ``hackrf_sweep``."""
+"""Абстракция SDR-устройства с использованием ``hackrf_sweep``."""
 from __future__ import annotations
 
 import numpy as np
@@ -14,38 +14,38 @@ lib = _lib.lib if _lib else None
 
 
 class SDRDevice:
-    """Represents a single HackRF One device."""
+    """Представляет одно устройство HackRF One."""
 
     def __init__(self, serial: str) -> None:
         self.serial = serial
 
     def open(self) -> None:
-        """Open the device connection.
+        """Открыть соединение с устройством.
 
-        The :mod:`hackrf_sweep` library handles device setup internally when
-        starting a sweep, so this method is a no-op provided for API
-        compatibility.
+        Библиотека :mod:`hackrf_sweep` выполняет настройку устройства при
+        запуске сканирования, поэтому этот метод присутствует лишь для
+        совместимости API.
         """
 
     def close(self) -> None:
-        """Close the device connection."""
+        """Закрыть соединение с устройством."""
 
     def read_samples(self, num_samples: int) -> np.ndarray:  # pragma: no cover - hardware specific
-        """Read IQ samples from the device.
+        """Считать IQ-сэмплы с устройства.
 
-        Direct sample access is not implemented in this skeleton; sweeping and
-        FFT processing are performed via :mod:`hackrf_sweep`.
+        Прямой доступ к сэмплам в данном каркасе не реализован; сканирование и
+        обработка FFT выполняются через :mod:`hackrf_sweep`.
         """
-        raise NotImplementedError("Direct sample access not implemented")
+        raise NotImplementedError("Прямой доступ к сэмплам не реализован")
 
 
 def enumerate_devices() -> List[SDRDevice]:
-    """Return list of available HackRF devices.
+    """Вернуть список доступных устройств HackRF.
 
-    The underlying ``libhackrf`` library requires :func:`hackrf_init` to be
-    called before any device operations. Failing to do so may lead to a
-    segmentation fault on some systems. We therefore initialise the library
-    temporarily while collecting the device list and shut it down afterwards.
+    Библиотека ``libhackrf`` требует вызова :func:`hackrf_init` перед любой
+    работой с устройством. В противном случае возможна сегментация на некоторых
+    системах. Поэтому мы временно инициализируем библиотеку для получения
+    списка устройств и затем корректно завершаем работу.
     """
 
     devices: List[SDRDevice] = []
@@ -66,7 +66,7 @@ def enumerate_devices() -> List[SDRDevice]:
 
 
 class MockSDR(SDRDevice):
-    """Mock SDR device used for tests and development."""
+    """Мок-устройство SDR для тестов и разработки."""
 
     def __init__(self, serial: str = "MOCK") -> None:
         super().__init__(serial)
