@@ -2,13 +2,13 @@
 from __future__ import annotations
 
 import numpy as np
-from threading import Event
-from typing import List
+from typing import Callable, List
 
 try:  # pragma: no cover - module may be unavailable during tests
-    from hackrf_sweep import _lib  # type: ignore
+    from hackrf_sweep import _lib, start_sweep  # type: ignore
 except Exception:  # pragma: no cover
     _lib = None  # type: ignore
+    start_sweep = None  # type: ignore
 
 ffi = _lib.ffi if _lib else None
 lib = _lib.lib if _lib else None
@@ -43,36 +43,16 @@ class SDRDevice:
         lib.hackrf_exit()
         self._dev = ffi.NULL
 
-    def read_samples(self, num_samples: int) -> np.ndarray:  # pragma: no cover - hardware specific
-        """Считать ``num_samples`` IQ-сэмплов с устройства."""
+    def sweep(self, callback: Callable[[np.ndarray], None], *, config_path: str = "config.json") -> None:
+        """Запустить свип и вызывать ``callback`` для каждого готового спектра."""
 
-        if lib is None or not self._dev:
-            raise RuntimeError("Устройство не открыто")
+        if start_sweep is None:  # pragma: no cover - no extension during tests
+            raise RuntimeError("hackrf_sweep не установлен")
 
-        total = num_samples * 2
-        buf = ffi.new("uint8_t[]", total)
-        written = 0
-        ready = Event()
+        def _handle(data: np.ndarray) -> None:
+            callback(data.ravel())
 
-        @ffi.callback("int(hackrf_transfer*)")
-        def _cb(transfer):
-            nonlocal written
-            n = min(transfer.valid_length, total - written)
-            ffi.memmove(buf + written, transfer.buffer, n)
-            written += n
-            if written >= total:
-                ready.set()
-            return 0
-
-        if lib.hackrf_start_rx(self._dev, _cb, ffi.NULL) != 0:
-            raise RuntimeError("hackrf_start_rx failed")
-        ready.wait()
-        lib.hackrf_stop_rx(self._dev)
-
-        arr = np.frombuffer(ffi.buffer(buf, total), dtype=np.uint8)
-        i = arr[0::2].astype(np.float32) - 128
-        q = arr[1::2].astype(np.float32) - 128
-        return (i + 1j * q).astype(np.complex64) / 128.0
+        start_sweep(_handle, config_path=config_path, serial=self.serial)
 
 
 def enumerate_devices() -> List[SDRDevice]:
@@ -107,9 +87,8 @@ class MockSDR(SDRDevice):
     def __init__(self, serial: str = "MOCK") -> None:
         super().__init__(serial)
 
-    def read_samples(self, num_samples: int) -> np.ndarray:  # pragma: no cover - deterministic
-        t = np.arange(num_samples)
-        signal = np.exp(2j * np.pi * 0.1 * t)
-        noise = (np.random.randn(num_samples) + 1j * np.random.randn(num_samples)) * 0.01
-        return (signal + noise).astype(np.complex64)
+    def sweep(self, callback: Callable[[np.ndarray], None], *, config_path: str = "config.json") -> None:
+        bins = 512
+        power = np.abs(np.fft.rfft(np.random.randn(bins))).astype(np.float32)
+        callback(power)
 

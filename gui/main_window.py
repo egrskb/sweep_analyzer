@@ -10,7 +10,6 @@ import pyqtgraph as pg
 from pyqtgraph.exporters import ImageExporter
 from pathlib import Path
 
-from core.fft import FFTProcessor
 from core.sdr import SDRDevice, MockSDR, enumerate_devices
 from gui.widgets.fft_plot import FFTPlot
 from gui.widgets.waterfall_plot import WaterfallPlot
@@ -19,26 +18,31 @@ from utils import logging as dlogging
 
 
 class SweepWorker(QtCore.QThread):
-    """Фоновый поток, выполняющий циклический съём спектра."""
+    """Фоновый поток, выполняющий свип через ``hackrf_sweep``."""
 
     updated = QtCore.pyqtSignal(np.ndarray, np.ndarray)
 
-    def __init__(self, device: SDRDevice, fft: FFTProcessor, parent: Optional[QtCore.QObject] = None) -> None:
+    def __init__(self, device: SDRDevice, cfg: dict, parent: Optional[QtCore.QObject] = None) -> None:
         super().__init__(parent)
         self.device = device
-        self.fft = fft
+        self.cfg = cfg
         self._running = False
 
     def run(self) -> None:  # pragma: no cover - GUI thread
         self._running = True
-        while self._running:
-            iq = self.device.read_samples(self.fft.fft_size if hasattr(self.fft, 'fft_size') else 1024)
-            freqs, power = self.fft.process(iq)
+
+        def handle(power: np.ndarray) -> None:
+            freqs = np.linspace(self.cfg["freq_start"], self.cfg["freq_stop"], power.size)
             self.updated.emit(freqs, power)
-            self.msleep(1000)
+
+        try:
+            self.device.sweep(handle)
+        except Exception:
+            pass
 
     def stop(self) -> None:
         self._running = False
+        self.terminate()
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -137,8 +141,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def start(self) -> None:
         if not self.device:
             return
-        fft = FFTProcessor(sample_rate=self.cfg["sample_rate"], avg_window=self.cfg["avg_window"])
-        self.worker = SweepWorker(self.device, fft)
+        self.worker = SweepWorker(self.device, self.cfg)
         self.worker.updated.connect(self.update_plots)
         self.worker.start()
 
