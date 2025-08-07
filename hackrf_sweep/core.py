@@ -107,8 +107,23 @@ def start_sweep(
     callback: Callable[[np.ndarray], None], *,
     config_path: str = "config.json",
     serial: Optional[str] = None,
+    stop_event: Optional[Event] = None,
 ) -> None:
-    """Запустить свип и вызывать ``callback`` для каждого готового свипа."""
+    """Запустить свип и вызывать ``callback`` для каждого готового свипа.
+
+    Parameters
+    ----------
+    callback:
+        Пользовательский обработчик одного спектра.
+    config_path:
+        Путь к JSON-файлу с параметрами свипа.
+    serial:
+        Серийный номер устройства HackRF One. Если ``None``, используется
+        первое доступное устройство.
+    stop_event:
+        Объект :class:`threading.Event`, установка которого останавливает
+        свип. Если не указан, функция блокируется бессрочно (как раньше).
+    """
 
     global _callback, STEP_COUNT, _buffers, _buffer_ptrs, _freq_start_mhz, _step_mhz, _active_buf
 
@@ -199,8 +214,8 @@ def start_sweep(
             raise RuntimeError("hackrf_start_rx_sweep failed")
 
         try:
-            # Ждём завершения, пока пользователь не нажмёт Ctrl+C
-            Event().wait()
+            stop_event = stop_event or Event()
+            stop_event.wait()
         except KeyboardInterrupt:
             pass
     finally:

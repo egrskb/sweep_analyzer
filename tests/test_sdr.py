@@ -1,10 +1,17 @@
 from core.sdr import MockSDR, enumerate_devices
+from threading import Event
 
 
 def test_mock_sweep():
     dev = MockSDR()
     received = []
-    dev.sweep(lambda p: received.append(p))
+    stop = Event()
+
+    def handler(p):
+        received.append(p)
+        stop.set()
+
+    dev.sweep(handler, stop_event=stop)
     assert received and received[0].ndim == 1
 
 

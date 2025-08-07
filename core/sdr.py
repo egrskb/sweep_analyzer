@@ -1,8 +1,15 @@
-"""Абстракция SDR-устройства с использованием ``hackrf_sweep``."""
+"""Абстракция SDR-устройства для HackRF One.
+
+Модуль предоставляет простой класс :class:`SDRDevice`, который использует
+библиотеку :mod:`hackrf_sweep` для выполнения спектральных свипов. Для
+разработки и тестов предусмотрен класс :class:`MockSDR`, генерирующий
+случайные спектры.
+"""
 from __future__ import annotations
 
 import numpy as np
-from typing import Callable, List
+from typing import Callable, List, Optional
+from threading import Event
 
 try:  # pragma: no cover - module may be unavailable during tests
     from hackrf_sweep import _lib, start_sweep  # type: ignore
@@ -43,8 +50,24 @@ class SDRDevice:
         lib.hackrf_exit()
         self._dev = ffi.NULL
 
-    def sweep(self, callback: Callable[[np.ndarray], None], *, config_path: str = "config.json") -> None:
-        """Запустить свип и вызывать ``callback`` для каждого готового спектра."""
+    def sweep(
+        self,
+        callback: Callable[[np.ndarray], None],
+        *,
+        config_path: str = "config.json",
+        stop_event: Optional[Event] = None,
+    ) -> None:
+        """Запустить непрерывный свип.
+
+        Parameters
+        ----------
+        callback:
+            Пользовательская функция, принимающая одномерный массив мощностей.
+        config_path:
+            Путь к JSON-файлу с параметрами свипа.
+        stop_event:
+            Событие, установка которого завершает свип.
+        """
 
         if start_sweep is None:  # pragma: no cover - no extension during tests
             raise RuntimeError("hackrf_sweep не установлен")
@@ -52,7 +75,9 @@ class SDRDevice:
         def _handle(data: np.ndarray) -> None:
             callback(data.ravel())
 
-        start_sweep(_handle, config_path=config_path, serial=self.serial)
+        start_sweep(
+            _handle, config_path=config_path, serial=self.serial, stop_event=stop_event
+        )
 
 
 def enumerate_devices() -> List[SDRDevice]:
@@ -87,8 +112,17 @@ class MockSDR(SDRDevice):
     def __init__(self, serial: str = "MOCK") -> None:
         super().__init__(serial)
 
-    def sweep(self, callback: Callable[[np.ndarray], None], *, config_path: str = "config.json") -> None:
+    def sweep(
+        self,
+        callback: Callable[[np.ndarray], None],
+        *,
+        config_path: str = "config.json",
+        stop_event: Optional[Event] = None,
+    ) -> None:
+        stop_event = stop_event or Event()
         bins = 512
-        power = np.abs(np.fft.rfft(np.random.randn(bins))).astype(np.float32)
-        callback(power)
+        while not stop_event.is_set():
+            power = np.abs(np.fft.rfft(np.random.randn(bins))).astype(np.float32)
+            callback(power)
+            stop_event.wait(1.0)
 

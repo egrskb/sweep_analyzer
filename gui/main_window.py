@@ -4,6 +4,7 @@ from __future__ import annotations
 import sys
 import time
 from typing import Optional
+from threading import Event
 
 from PyQt5 import QtCore, QtWidgets, QtGui
 import numpy as np
@@ -27,12 +28,12 @@ class SweepWorker(QtCore.QThread):
         super().__init__(parent)
         self.device = device
         self.cfg = cfg
-        self._running = False
+        self._stop_event: Event | None = None
 
     def run(self) -> None:  # pragma: no cover - GUI thread
-        self._running = True
         start_ts = time.perf_counter()
         last_ts = start_ts
+        self._stop_event = Event()
 
         def handle(power: np.ndarray) -> None:
             nonlocal last_ts
@@ -43,16 +44,15 @@ class SweepWorker(QtCore.QThread):
             freqs = np.linspace(self.cfg["freq_start"], self.cfg["freq_stop"], power.size)
             self.updated.emit(freqs, power, sweep_time, elapsed)
 
-        while self._running:
-            try:
-                self.device.sweep(handle)
-            except Exception:
-                break
-            if isinstance(self.device, MockSDR):
-                time.sleep(1)
+        try:
+            self.device.sweep(handle, stop_event=self._stop_event)
+        except Exception:
+            pass
 
     def stop(self) -> None:
-        self._running = False
+        if self._stop_event:
+            self._stop_event.set()
+        self.wait(2000)
         if not isinstance(self.device, MockSDR):
             self.terminate()
 
@@ -105,6 +105,12 @@ class MainWindow(QtWidgets.QMainWindow):
             style.standardIcon(QtWidgets.QStyle.SP_MediaStop), "Стоп", self.stop
         )
         self.stop_action.setEnabled(False)
+        start_btn = self.toolbar.widgetForAction(self.start_action)
+        if start_btn:
+            start_btn.setStyleSheet("background-color:#4caf50;color:black;")
+        stop_btn = self.toolbar.widgetForAction(self.stop_action)
+        if stop_btn:
+            stop_btn.setStyleSheet("background-color:#f44336;color:black;")
 
         self.status = self.statusBar()
         self.status.showMessage("Готов")
@@ -151,15 +157,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.set_device(devices[0])
 
     def set_device(self, dev: SDRDevice) -> None:
-        if self.device is not None and self.worker:
+        if self.worker:
             self.worker.stop()
+            self.worker = None
         self.device = dev
-        try:
-            self.device.open()
-        except Exception:
-            pass
 
     def start(self) -> None:
+        """Запустить свип от текущего устройства."""
         if not self.device or self.worker:
             return
         self.start_action.setEnabled(False)
@@ -171,7 +175,6 @@ class MainWindow(QtWidgets.QMainWindow):
     def stop(self) -> None:
         if self.worker:
             self.worker.stop()
-            self.worker.wait()
             self.worker = None
         self.start_action.setEnabled(True)
         self.stop_action.setEnabled(False)
