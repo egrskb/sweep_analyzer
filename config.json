@@ -1,0 +1,13 @@
+{
+  "sample_rate": 20000000,
+  "bandwidth": 15000000,
+  "freq_start_mhz": 50.0,
+  "freq_stop_mhz": 6000.0,
+  "step_mhz": 5.0,
+  "vga_gain": 20,
+  "lna_gain": 16,
+  "threshold_db": 10.0,
+  "ignore_level_dbm": -100.0,
+  "min_bins": 3,
+  "stddev_max_db": 5.0
+}
