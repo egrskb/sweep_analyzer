@@ -8,8 +8,8 @@ from typing import Any, Dict
 DEFAULT_CONFIG = {
     "freq_start": 50e6,
     "freq_stop": 6e9,
-    "freq_step": 5e6,
-    "bin_size": 1e3,
+    "freq_step": 1e6,
+    "bin_size": 1e6,
     "sample_rate": 2e6,
     "gain": 20,
     "ppm": 0,

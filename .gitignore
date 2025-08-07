@@ -15,3 +15,11 @@ dist/
 
 # OS files
 .DS_Store
+
+# Local configuration
+config.json
+
+# hackrf_sweep build artifacts
+hackrf_sweep/sweep_callback.o
+hackrf_sweep/_lib.o
+hackrf_sweep/_lib.cpython-*.so

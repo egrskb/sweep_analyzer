@@ -1,6 +1,7 @@
 """Data logging utilities."""
 from __future__ import annotations
 
+import datetime as _dt
 import numpy as np
 from pathlib import Path
 from typing import Iterable
@@ -12,9 +13,25 @@ except Exception:  # pragma: no cover
 
 
 def save_csv(path: Path, freqs: np.ndarray, power: np.ndarray) -> None:
-    """Save spectrum to CSV file."""
-    data = np.column_stack((freqs, power))
-    np.savetxt(path, data, delimiter=",", header="freq,power_db")
+    """Save spectrum in HackRF sweep CSV format.
+
+    Формат соответствует выходу `hackrf_sweep`:
+
+    ``date, time, hz_low, hz_high, hz_bin_width, num_samples, dB...``
+    """
+    now = _dt.datetime.now()
+    date_str = now.strftime("%Y-%m-%d")
+    time_str = now.strftime("%H:%M:%S.%f")
+    hz_low = float(freqs[0])
+    hz_high = float(freqs[-1])
+    bin_width = float(freqs[1] - freqs[0]) if len(freqs) > 1 else 0.0
+    header = f"{date_str}, {time_str}, {hz_low:.0f}, {hz_high:.0f}, {bin_width:.0f}, {len(freqs)}"
+    power_str = ", ".join(f"{p:.2f}" for p in power)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(header)
+        if power_str:
+            f.write(", " + power_str)
+        f.write("\n")
 
 
 def save_hdf5(path: Path, spectra: Iterable[np.ndarray]) -> None:
