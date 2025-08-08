@@ -2,10 +2,6 @@
 from __future__ import annotations
 
 import sys
-import time
-from typing import Optional
-from threading import Event
-
 from PyQt5 import QtCore, QtWidgets, QtGui
 import numpy as np
 import pyqtgraph as pg
@@ -15,54 +11,10 @@ from pathlib import Path
 from core.sdr import SDRDevice, enumerate_devices
 from gui.widgets.fft_plot import FFTPlot
 from gui.widgets.waterfall_plot import WaterfallPlot
+from gui.sweep_worker import SweepWorker
+from gui.settings_dialog import SettingsDialog
 from utils import config
 from utils import logging as dlogging
-
-
-class SweepWorker(QtCore.QThread):
-    """Фоновый поток, выполняющий свип через ``hackrf_sweep``."""
-
-    updated = QtCore.pyqtSignal(np.ndarray, np.ndarray, float, float)
-
-    def __init__(self, device: SDRDevice, cfg: dict, parent: Optional[QtCore.QObject] = None) -> None:
-        super().__init__(parent)
-        self.device = device
-        self.cfg = cfg
-        self._stop_event: Event | None = None
-
-    def run(self) -> None:  # pragma: no cover - GUI thread
-        start_ts = time.perf_counter()
-        last_ts = start_ts
-        self._stop_event = Event()
-
-        def handle(power: np.ndarray) -> None:
-            nonlocal last_ts
-            now = time.perf_counter()
-            sweep_time = now - last_ts
-            elapsed = now - start_ts
-            last_ts = now
-            freqs = np.arange(
-                self.cfg["freq_start"],
-                self.cfg["freq_stop"],
-                self.cfg["bin_size"],
-            )
-            if freqs.size != power.size:
-                freqs = np.linspace(
-                    self.cfg["freq_start"],
-                    self.cfg["freq_stop"],
-                    power.size,
-                )
-            self.updated.emit(freqs, power, sweep_time, elapsed)
-
-        try:
-            self.device.sweep(handle, stop_event=self._stop_event)
-        except Exception:
-            pass
-
-    def stop(self) -> None:
-        if self._stop_event:
-            self._stop_event.set()
-        self.wait(2000)
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -83,44 +35,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setCentralWidget(center)
         self.fft_plot.set_levels(self.cfg["level_min"], self.cfg["level_max"])
         self.waterfall.set_levels(self.cfg["level_min"], self.cfg["level_max"])
-
-        # настройки диапазона
-        self.settings_dock = QtWidgets.QDockWidget("Диапазон", self)
-        form = QtWidgets.QFormLayout()
-        w = QtWidgets.QWidget()
-        w.setLayout(form)
-        self.start_spin = QtWidgets.QDoubleSpinBox()
-        self.start_spin.setRange(0, 6e9)
-        self.start_spin.setValue(self.cfg["freq_start"])
-        self.start_spin.valueChanged.connect(lambda v: self._update_cfg("freq_start", v))
-        self.stop_spin = QtWidgets.QDoubleSpinBox()
-        self.stop_spin.setRange(0, 6e9)
-        self.stop_spin.setValue(self.cfg["freq_stop"])
-        self.stop_spin.valueChanged.connect(lambda v: self._update_cfg("freq_stop", v))
-        self.bin_spin = QtWidgets.QDoubleSpinBox()
-        self.bin_spin.setRange(1, 1e6)
-        self.bin_spin.setValue(self.cfg["bin_size"])
-        self.bin_spin.valueChanged.connect(lambda v: self._update_cfg("bin_size", v))
-        self.step_spin = QtWidgets.QDoubleSpinBox()
-        self.step_spin.setRange(1e3, 1e9)
-        self.step_spin.setValue(self.cfg["freq_step"])
-        self.step_spin.valueChanged.connect(lambda v: self._update_cfg("freq_step", v))
-        self.level_min = QtWidgets.QDoubleSpinBox()
-        self.level_min.setRange(-200, 0)
-        self.level_min.setValue(self.cfg["level_min"])
-        self.level_min.valueChanged.connect(lambda v: self._update_cfg("level_min", v))
-        self.level_max = QtWidgets.QDoubleSpinBox()
-        self.level_max.setRange(-200, 0)
-        self.level_max.setValue(self.cfg["level_max"])
-        self.level_max.valueChanged.connect(lambda v: self._update_cfg("level_max", v))
-        form.addRow("Старт, Гц", self.start_spin)
-        form.addRow("Стоп, Гц", self.stop_spin)
-        form.addRow("Bin, Гц", self.bin_spin)
-        form.addRow("Шаг, Гц", self.step_spin)
-        form.addRow("Ур. мин, дБ", self.level_min)
-        form.addRow("Ур. макс, дБ", self.level_max)
-        self.settings_dock.setWidget(w)
-        self.addDockWidget(QtCore.Qt.RightDockWidgetArea, self.settings_dock)
 
         self.toolbar = self.addToolBar("Главная")
         style = self.style()
@@ -160,6 +74,7 @@ class MainWindow(QtWidgets.QMainWindow):
         plot_menu.addAction("Сбросить масштаб", self.reset_view)
 
         settings_menu = menubar.addMenu("Настройки")
+        settings_menu.addAction("Параметры…", self.open_settings)
         device_menu = settings_menu.addMenu("Главный SDR")
         self.device_group = QtWidgets.QActionGroup(self)
         self.device_group.setExclusive(True)
@@ -229,12 +144,15 @@ class MainWindow(QtWidgets.QMainWindow):
             f"Свип: {sweep_time:.2f} с | Время работы: {elapsed:.1f} с"
         )
 
-    def _update_cfg(self, key: str, value: float) -> None:
-        self.cfg[key] = value
-        config.save_config(self.cfg)
-        if key in {"level_min", "level_max"}:
+    def open_settings(self) -> None:
+        """Открыть диалог настроек."""
+        dlg = SettingsDialog(self.cfg, self)
+        if dlg.exec_() == QtWidgets.QDialog.Accepted:
+            self.cfg = dlg.cfg
             self.fft_plot.set_levels(self.cfg["level_min"], self.cfg["level_max"])
             self.waterfall.set_levels(self.cfg["level_min"], self.cfg["level_max"])
+            if self.worker:
+                self.stop()
 
     def export_spectrum(self) -> None:
         path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Экспорт спектра", filter="Файлы PNG (*.png)")
