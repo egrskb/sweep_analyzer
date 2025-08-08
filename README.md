@@ -118,6 +118,14 @@ If no anomalies are found, it prints `нет подозрительных акт
 Он создаст виртуальное окружение, установит зависимости, соберёт расширение
 `hackrf_sweep`, сгенерирует документацию Sphinx и запустит приложение.
 
+После установки пакета через ``pip install -e .`` доступны консольные команды:
+
+```
+pan_start  # запуск GUI
+pan_info   # информация о программе
+pan_sweep  # вывод результатов свипа в консоль
+```
+
 ## Development notes
 
 After modifying the C sources or configuration, re-run `python build_hackrf_sweep.py` to rebuild the extension.  `start_sweep` handles initialisation and cleanup of the device, but you must have a HackRF attached for the example to run successfully.

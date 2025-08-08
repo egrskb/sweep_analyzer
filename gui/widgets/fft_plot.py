@@ -5,7 +5,7 @@ from collections import deque
 
 import numpy as np
 import pyqtgraph as pg
-from PyQt5 import QtWidgets
+from PyQt5 import QtWidgets, QtCore
 from scipy.signal import savgol_filter, find_peaks
 
 
@@ -29,6 +29,7 @@ class FFTPlot(QtWidgets.QWidget):
         self.peak_curve = self.plot.plot(pen=pg.mkPen("r", width=2))
         self.baseline_curve = self.plot.plot(pen=pg.mkPen("g"))
         self.plot.scene().sigMouseMoved.connect(self._mouse_moved)
+        self.plot.scene().sigMouseClicked.connect(self._plot_clicked)
         self.plot.setLabel("left", "Мощность", units="дБ")
         self.plot.setLabel("bottom", "Частота", units="Гц")
 
@@ -63,6 +64,10 @@ class FFTPlot(QtWidgets.QWidget):
         self.baseline_curve.setData(freqs, self._baseline)
 
         return smooth
+
+    def _plot_clicked(self, evt) -> None:  # pragma: no cover - UI callback
+        if evt.button() == QtCore.Qt.LeftButton:
+            self.reset_view()
 
     def _mouse_moved(self, pos) -> None:  # pragma: no cover - UI callback
         if not self.plot.sceneBoundingRect().contains(pos):

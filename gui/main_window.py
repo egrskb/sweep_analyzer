@@ -156,7 +156,11 @@ class MainWindow(QtWidgets.QMainWindow):
         file_menu.addAction("Экспорт водопада", self.export_waterfall)
         file_menu.addAction("Сохранить CSV", self.save_csv)
 
-        device_menu = menubar.addMenu("Главный SDR")
+        plot_menu = menubar.addMenu("График")
+        plot_menu.addAction("Сбросить масштаб", self.reset_view)
+
+        settings_menu = menubar.addMenu("Настройки")
+        device_menu = settings_menu.addMenu("Главный SDR")
         self.device_group = QtWidgets.QActionGroup(self)
         self.device_group.setExclusive(True)
         self._device_menu = device_menu
@@ -177,7 +181,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.device_group.setExclusive(True)
         devices = enumerate_devices()
         if not devices:
-            QtWidgets.QMessageBox.warning(self, "Устройства", "HackRF не найден")
+            noact = QtWidgets.QAction("Нет доступных", self)
+            noact.setEnabled(False)
+            self._device_menu.addAction(noact)
             return
         for dev in devices:
             action = QtWidgets.QAction(dev.serial, self, checkable=True)
