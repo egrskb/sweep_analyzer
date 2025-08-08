@@ -1,0 +1,94 @@
+"""Многоразовый виджет графика FFT на основе pyqtgraph."""
+from __future__ import annotations
+
+from collections import deque
+
+import numpy as np
+import pyqtgraph as pg
+from PyQt5 import QtWidgets, QtCore
+from scipy.signal import savgol_filter, find_peaks
+
+
+class FFTPlot(QtWidgets.QWidget):
+    """Виджет, отображающий одиночный спектральный след."""
+
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(parent)
+        layout = QtWidgets.QVBoxLayout(self)
+        info = QtWidgets.QHBoxLayout()
+        self.freq_label = QtWidgets.QLabel("Частота: -")
+        self.power_label = QtWidgets.QLabel("Мощность: -")
+        info.addWidget(self.freq_label)
+        info.addStretch()
+        info.addWidget(self.power_label)
+        layout.addLayout(info)
+
+        self.plot = pg.PlotWidget()
+        layout.addWidget(self.plot)
+        self.curve = self.plot.plot(pen=pg.mkPen("y"))
+        self.peak_curve = self.plot.plot(pen=pg.mkPen("r", width=2))
+        self.baseline_curve = self.plot.plot(pen=pg.mkPen("g"))
+        self.plot.scene().sigMouseMoved.connect(self._mouse_moved)
+        self.plot.scene().sigMouseClicked.connect(self._plot_clicked)
+        self.plot.setLabel("left", "Мощность", units="дБ")
+        self.plot.setLabel("bottom", "Частота", units="Гц")
+
+        self._avg_buffer: deque[np.ndarray] = deque(maxlen=5)
+        self._baseline: np.ndarray | None = None
+
+    def update_spectrum(self, freqs: np.ndarray, power: np.ndarray) -> np.ndarray:
+        """Обновить график новыми данными.
+
+        Данные предварительно усредняются и сглаживаются фильтром
+        Савицкого–Голея. Отдельный красный график отображает огибающую
+        пиков спектра.
+        """
+
+        self._avg_buffer.append(power)
+        avg = np.mean(np.vstack(self._avg_buffer), axis=0)
+
+        win = min(11, max(3, (len(avg) // 2) * 2 + 1))
+        smooth = savgol_filter(avg, win, 2)
+        self.curve.setData(freqs, smooth)
+
+        peaks, _ = find_peaks(smooth)
+        if peaks.size > 1:
+            envelope = np.interp(np.arange(len(smooth)), peaks, smooth[peaks])
+            self.peak_curve.setData(freqs, envelope)
+        else:
+            self.peak_curve.setData(freqs[peaks], smooth[peaks])
+
+        self._baseline = (
+            smooth if self._baseline is None else np.minimum(self._baseline, smooth)
+        )
+        self.baseline_curve.setData(freqs, self._baseline)
+
+        return smooth
+
+    def _plot_clicked(self, evt) -> None:  # pragma: no cover - UI callback
+        if evt.button() == QtCore.Qt.LeftButton:
+            self.reset_view()
+
+    def _mouse_moved(self, pos) -> None:  # pragma: no cover - UI callback
+        if not self.plot.sceneBoundingRect().contains(pos):
+            return
+        mouse_point = self.plot.plotItem.vb.mapSceneToView(pos)
+        x = mouse_point.x()
+        y = mouse_point.y()
+        self.freq_label.setText(f"Частота: {x/1e6:.2f} МГц")
+        self.power_label.setText(f"Мощность: {y:.1f} дБм")
+
+    def set_levels(self, vmin: float, vmax: float) -> None:
+        """Установить диапазон уровней по оси Y."""
+        self.plot.setYRange(vmin, vmax, padding=0)
+
+    def reset_view(self) -> None:
+        """Очистить график и сбросить масштаб."""
+        self.plot.enableAutoRange(True, True)
+        self.curve.clear()
+        self.peak_curve.clear()
+        self.baseline_curve.clear()
+        self._avg_buffer.clear()
+        self._baseline = None
+        self.freq_label.setText("Частота: -")
+        self.power_label.setText("Мощность: -")
